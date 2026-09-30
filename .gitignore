@@ -1,0 +1,13 @@
+__pycache__/
+.pytest_cache/
+.venv/
+.reference/
+*.egg-info/
+*.tsv
+*.xlsx
+*.solide.json
+reports/
+evidence/
+artifacts/
+*.log
+browser_profiles/
