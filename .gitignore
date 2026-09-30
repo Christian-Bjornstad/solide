@@ -11,3 +11,11 @@ evidence/
 artifacts/
 *.log
 browser_profiles/
+.solide/
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.zip
+*.tmp

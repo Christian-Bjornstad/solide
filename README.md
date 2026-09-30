@@ -1,108 +1,113 @@
 # Solide
 
-Lokal Windows-app for Ion Reporter- og Genexus-variantgjennomgang.
-Mosegrønn og hvit PyQt6-arbeidsflate med import, QC, variantutvalg,
-databaseoppslag og én Excel-rapport per pasient.
+Local Windows desktop app for solid tumour variant review. Import Ion Reporter
+and Genexus exports, review row-level quality, select variants, collect database
+evidence through Edge, and export one Excel workbook per patient.
 
-## Start på denne PC-en
+![Solide workspace with synthetic data](docs/images/solide.png)
+
+## Install and start
+
+Python 3.11+ and Microsoft Edge are required.
 
 ```powershell
 python -m pip install -e ".[dev]"
 python start_python_felles.py
 ```
 
-Alternativt: dobbeltklikk `SOLIDE_START.cmd` etter installasjon.
+After installation, `SOLIDE_START.cmd` also starts the app.
 
-## Jobb-PC / Python FELLES
+For the laboratory's **Python FELLES** environment:
 
-1. Legg prosjektet i en fast mappe som du har tilgang til.
-2. Kjør `SOLIDE_INSTALL.cmd`, lim inn kommandoen i Python FELLES og trykk Enter.
-3. Lukk Python FELLES og kjør `SOLIDE_START.cmd`; lim inn startkommandoen.
-4. Velg godkjent arbeidsmappe i Innstillinger.
+1. Save the project in a permanent folder.
+2. Run `SOLIDE_INSTALL.cmd`, paste the copied command into Python FELLES and press Enter.
+3. Close Python FELLES, run `SOLIDE_START.cmd` and paste its start command.
+4. Choose an approved local workspace folder in **Settings**.
 
-Skriptmønsteret er tilpasset MolStat. Ivanti app-ID 15694 er hentet derfra og
-må bekreftes på jobb-PC. Python >=3.11 kreves; Python FELLES 3.14 er ikke prøvd
-her. Installasjon skjer i brukerens site-packages uten administratorrettigheter.
-Bootstraplogger: `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
+The shared-interpreter bootstrap follows
+[MolStat](https://github.com/Christian-Bjornstad/MolStat). Ivanti app ID 15694
+and Python FELLES compatibility must be checked on the work PC. Installation
+uses the user's site-packages without administrator rights. Failure logs are
+written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 
-## Arbeidsflyt
+## Workflow
 
-1. Last inn TSV eller Genexus XLSX og bekreft pasient/prøve-ID og hg19.
-   Appen bruker ikke filnavnet som pasientidentitet. Samme fil/rad importeres
-   bare én gang i økten; ulike eksportfiler beholdes som separate kilder.
-2. Gjennomgå Kvalitet. Coverage <500 gjelder hver eksportert rad, og berørte
-   gener flagges. QC inkluderer også rader uten valgt databaseoppslag.
-3. Kryss av varianter i Variantutvalg. Genexus PRESENT-småvarianter forvelges;
-   alle rader er tilgjengelige. Ion-rader uten PRESENT-status velges manuelt.
-4. Velg databaser og vev under Databaseoppslag. Other er standard for MTBP.
-5. Delins/complex og kjente FGFR1/MET-transkriptavvik må kontrolleres før
-   ordinære databaseoppslag. Mutalyzer-køen viser normalisering og eventuelt
-   forslag på måltranskript. Angi full kontrollert HGVS i variantens detaljpanel
-   og kryss av at den er kontrollert. Rå eksport beholdes.
-6. Lagre arbeidsøkten og start oppslag. Pause/stopp gjelder ved sikre stoppunkter;
-   aktive HTTP-/nettleseroperasjoner kan måtte fullføre eller nå tidsgrensen.
-   Resultater lagres til økten etter hver returnerte kilde. Foreløpige
-   skjermbildefangster beholdes ved avbrudd og merkes ufullstendige.
-7. Gjennomgå treff og feil. Dobbeltklikk et oppslag for kilde-URL.
-8. Generer én Excel-rapport eller rapporter for alle pasienter. Lukk eksisterende
-   målfil i Excel før regenerering. Kommentarer føres og bevares i appens økt;
-   kommentarer redigert direkte i eksportert Excel importeres ikke tilbake.
+1. **Import** TSV or Genexus XLSX; confirm patient / sample ID and assembly.
+2. **Quality** shows flags from every imported row, including unselected rows.
+3. **Variants** lets you filter, select, comment and review variant identity.
+4. **Sources** selects databases and MTBP tissue (default **Other**). Save the
+   session, sign in through Edge where needed, then run searches.
+5. Review source status and screenshots before exporting **Reports**.
 
-## QC og nomenklatur
+Sessions preserve source data, comments, reviewed HGVS and search history locally.
+Comments edited directly in an exported Excel file are not imported back.
+Pause and stop take effect at checkpoints; active browser or HTTP requests may
+need to finish first. Provisional captures remain marked as partial evidence.
 
-- Coverage <500: Feilet. Manglende småvariantcoverage: Ukjent.
-- CNV Copy Number <1: Feilet. =1: Kontroll. Manglende: Ukjent.
-- RNAExonTiles NO CALL: Feilet uttrykksubalanse.
-- RNAExonVariant ABSENT: Rapporteres som status, ikke positivt funn.
-- Intronoffset 1–100 bp: SpliceAI-kandidat. HGVS-offset og modellvindu er
-  forskjellige: denne versjonen bruker distance=500 og mask=1 i SpliceAI.
+## Quality and nomenclature
 
-Reglene gjelder de importerte radene; de bekrefter ikke hele geners dekning.
-Pakkeavgrensning må foreløpig gjøres ved å importere riktig assay-eksport.
+| Check | Result |
+|---|---|
+| Coverage <500 on a row | Failed coverage |
+| CNV Copy Number <1 | Failed CNV |
+| CNV Copy Number =1 | Review boundary value |
+| RNAExonTiles NO CALL | Failed expression imbalance |
+| RNAExonVariant ABSENT | Included as a status, not a positive finding |
+| Intronic HGVS offset 1–100 bp | SpliceAI candidate |
 
-## Oppslag og begrensninger
+Missing numeric QC values are unknown. Coverage describes exported rows, not
+whole-gene coverage. Assay / gene-package selection currently follows the imported
+export; the laboratory must define any additional panel rules.
 
-ClinVar, Franklin, COSMIC, OncoKB og MTBP bruker en tilpasset, versjonslåst
-Archer Edge/CDP-tjeneste. Edge remote debugging må være tillatt på jobb-PC.
-COSMIC har ingen lymfoid vevsbegrensning i Solide. MTBP velger vevet eksakt.
-Innlogging skjer direkte i synlig Edge; automatiske oppslag er minimert som standard.
+Delins / complex variants require Mutalyzer review. Known FGFR1 and MET transcript
+differences require mapped, reviewed HGVS on the target transcript:
 
-Mutalyzer og SpliceAI har egne HTTP-adaptere. SpliceAI venter minst 30 sekunder
-mellom oppslag og krever eksplisitt GRCh37, locus, REF og ALT. Genexus-XLSX
-mangler REF/ALT og kan derfor ikke brukes direkte til slike genomiske oppslag.
-MTBP, OncoKB og Franklin kan bruke gen/protein når transkript mangler; resultatet
-merkes med dette søkegrunnlaget. ClinVar krever transkript eller genomiske alleler.
-FGFR1/MET krever avklart transkript. Flere gener/
-transkripter må avklares i detaljpanelet. HSMD føres manuelt i kommentar.
+| Gene | Exported transcript | Target transcript |
+|---|---|---|
+| FGFR1 | NM_001127500.3 | NM_023110.3 |
+| MET | NM_001174067.1 | NM_000245.4 |
 
-Kontrollert HGVS bruker ikke original REF/ALT som automatisk reserve. Angi
-tilsvarende kontrollert hg19-variant som chr-pos-REF-ALT dersom det trengs
-genomisk søk eller SpliceAI etter en rettelse.
+Mutalyzer returns suggestions for manual approval in **Identity review**.
+Corrected HGVS never silently reuses original genomic alleles. Enter matching
+reviewed hg19 `chr-pos-REF-ALT` when a genomic lookup is needed after correction.
 
-Endring av vev eller variantidentitet gjør tidligere resultater utdaterte.
-MTBP-fullrapport blir også utdatert når pasientens variantutvalg endres.
-Ved MTBP-gjenopptak kjøres hele det valgte pasientutvalget hvis noe mangler,
-slik at fullrapporten dekker samme utvalg. Gamle portalrapporter slettes ikke
-automatisk; ved full kapasitet må brukeren rydde i MTBP. Bare den nye rapporten
-kan fjernes automatisk etter at lokal fangst er fullført.
-Oppslagsfeil, tidsavbrudd, identitetsavvik og delvise bilder vises separat fra
-«ikke funnet». Regenerering bruker bare aktuelle bilder. Autentiserte profiler
-ligger under `%USERPROFILE%\.solide\browser_profiles`; de skal ikke kopieres til Git.
+## Database evidence
 
-Originalfiler, økter og rapporter lagres lokalt. Eksterne adaptere får bare
-variantdata og pseudonyme oppslags-ID-er, ikke pasient-ID, kommentarer eller
-originalfilnavn. Institusjonens kilde-/rapporttilgang må gjelde faktisk bruk.
+ClinVar, Franklin, COSMIC, OncoKB and MTBP use the pinned
+[Archer Edge/CDP runtime](docs/ARCHER_REUSE.md). Sign-in uses visible Edge;
+automated windows are minimised by default. Edge remote debugging must be allowed.
+Mutalyzer and SpliceAI use HTTP adapters. SpliceAI requires confirmed GRCh37 and
+explicit REF/ALT, uses `distance=500`, `mask=1`, and runs at least 30 seconds apart.
+Genexus XLSX may omit REF/ALT; these must be reviewed before genomic searches.
 
-Ingen pasientvarianter er sendt til eksterne tjenester under byggingen.
-Live resultater, MTBP Other, kontoer og jobb-PC-miljø må prøves i en pilot.
-Appen er vurderingsstøtte; rapporter må gjennomgås før klinisk bruk.
+Gene / protein or identifier-only lookups are explicitly labelled. Multiple
+genes / transcripts require identity review. Record HSMD results manually in
+the variant comment.
 
-## Utvikling
+Changing variant identity or tissue marks older evidence as outdated. Changing
+the selected patient batch also invalidates the MTBP full report. A resumed MTBP
+search reruns the whole selected batch when needed. Existing portal reports are
+not automatically deleted; the newly generated report may be removed after local
+capture. Errors and partial captures remain distinct from **Not found**.
+
+Patient IDs, local filenames, comments and raw worksheets are not sent to providers.
+Adapters receive variant data and pseudonymous search IDs. Authenticated profiles
+stay under `%USERPROFILE%\.solide\browser_profiles`. Source files, sessions,
+reports, credentials and browser profiles are excluded from Git.
+
+Live authenticated provider flows, MTBP **Other**, institutional access and the
+work-PC environment still require a laboratory pilot. No patient variants were
+sent to external services during development. Reports require professional review
+before clinical use.
+
+## Development
 
 ```powershell
 python -m pytest -q
 python -m compileall -q src install_python_felles.py start_python_felles.py
+python scripts/render_preview.py
 ```
 
-Se `docs/ARCHER_REUSE.md` for kildeversjon og tilpasninger og
-`docs/2026-09-30-solide-forundersokelse.md` for forundersøkelsen.
+Tests use synthetic fixtures. The optional local reference-file test is skipped
+when the laboratory's untracked input files are absent. The UI preview is synthetic.
+See [verification](docs/VERIFICATION.md) for tested scope and remaining checks.

@@ -2,6 +2,8 @@
 import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from pathlib import Path
+import sys
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from PyQt6.QtWidgets import QApplication
 from solide.models import Variant,Session
 from solide.gui import MainWindow
@@ -11,7 +13,7 @@ window=MainWindow()
 window.session=Session(variants=[
     Variant(patient='DEMO-001',gene='EGFR',transcript='NM_005228.5',coding='c.2573T>G',protein='p.L858R',
             af_percent=21.1,coverage=7050,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True,
-            comment='Syntetisk demonstrasjon; ingen pasientdata.',platform='Genexus',source_row=2),
+            comment='Synthetic demonstration',platform='Genexus',source_row=2),
     Variant(patient='DEMO-001',gene='TP53',transcript='NM_000546.6',coding='c.743G>A',protein='p.R248Q',
             af_percent=25.8,coverage=6355,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),
     Variant(patient='DEMO-001',gene='MET',transcript='NM_001174067.1',coding='c.3029C>T',protein='p.T1010I',
@@ -24,4 +26,11 @@ window.refresh();window.nav.setCurrentRow(2);window.show();app.processEvents()
 window.variant_table.selectRow(0);app.processEvents()
 out=Path('artifacts/solide-preview.png').resolve();out.parent.mkdir(exist_ok=True)
 window.grab().save(str(out));print(out)
+for index in range(window.nav.count()):
+    window.nav.setCurrentRow(index);app.processEvents()
+    window.grab().save(str(out.parent/f'page-{index}.png'))
+window.resize(1050,700)
+for index in (2,3):
+    window.nav.setCurrentRow(index);app.processEvents()
+    window.grab().save(str(out.parent/f'compact-{index}.png'))
 window.dirty=False;window.close()

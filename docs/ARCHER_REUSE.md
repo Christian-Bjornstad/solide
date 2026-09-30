@@ -7,9 +7,9 @@ Included under src/solide/_vendor/archer: evidence browser runtime and its
 direct dependencies, original model types. Imports namespaced to Solide.
 Default profile/config paths isolated; MTBP defaults to Other. COSMIC sample
 filter cleared to cover all tissues. No Archer artifact rules are applied.
-User explicitly requested using their reference project; original repository
-has no LICENSE file. Distribution beyond the repository owner's authorized
-use needs a license decision. Upstream tests are used for selected runtime
+The repository owner explicitly authorized this reuse and publication of Solide.
+The original repository has no LICENSE file; this repository does not add a
+third-party redistribution license. Upstream tests are used for selected runtime
 regressions. No data files or browser profiles are copied.
 
 Further adaptations: SOLIDE- portal report prefix; previous portal reports are

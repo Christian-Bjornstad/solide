@@ -16,15 +16,15 @@ def test_fraction_and_percent(tmp_path):
     assert not qc_flags(load_file(a).variants[0])
 
 @pytest.mark.parametrize('kind,call,cn,category', [
-    ('CNV','ABSENT',0.9,'CNV'), ('CNV','ABSENT',1,'CNV – kontroll'),
-    ('RNA Exon Tiles','NO CALL',None,'Uttrykksubalanse'),
+    ('CNV','ABSENT',0.9,'CNV'), ('CNV','ABSENT',1,'CNV review'),
+    ('RNA Exon Tiles','NO CALL',None,'Expression imbalance'),
     ('RNAExonVariant','ABSENT',None,'RNAExonVariant')])
 def test_qc_independent_of_selection(kind, call, cn, category):
     v = Variant(gene='MET', kind=kind, call=call, copy_number=cn, selected=False)
     assert any(f.category == category for f in qc_flags(v))
 
 def test_unknown_cnv_not_pass():
-    assert qc_flags(Variant(gene='MET',kind='CNV'))[0].status == 'Ukjent'
+    assert qc_flags(Variant(gene='MET',kind='CNV'))[0].status == 'Unknown'
 
 def test_splice_and_transcript_guards():
     assert 'SpliceAI' in review_reasons(Variant(coding='c.2350-100A>T'))
@@ -46,6 +46,14 @@ def test_session_roundtrip(tmp_path):
     save_session(s,p)
     assert load_session(p).variants[0].comment=='Behold'
 
+
+def test_legacy_unknown_assembly_session_preserves_user_data(tmp_path):
+    s=Session(variants=[Variant(patient='DEMO',assembly='Ukjent',comment='Behold',raw={'Gen':'original'})])
+    p=tmp_path/'legacy.json';save_session(s,p)
+    restored=load_session(p).variants[0]
+    assert restored.assembly=='Unknown'
+    assert restored.comment=='Behold' and restored.raw=={'Gen':'original'}
+
 def test_local_reference_formats():
     root=Path(__file__).parents[1]
     if not (root/'Snvindel.tsv').exists(): pytest.skip('Local reference files absent')
@@ -55,6 +63,6 @@ def test_local_reference_formats():
     x=load_file(next(root.glob('*.xlsx')))
     assert len(x.variants)==3204
     flags=[f for v in x.variants for f in qc_flags(v)]
-    assert sum(f.category=='CNV' and f.status=='Feilet' for f in flags)==4
-    assert sum(f.category=='Uttrykksubalanse' for f in flags)==5
+    assert sum(f.category=='CNV' and f.status=='Failed' for f in flags)==4
+    assert sum(f.category=='Expression imbalance' for f in flags)==5
     assert sum(f.category=='RNAExonVariant' for f in flags)==4

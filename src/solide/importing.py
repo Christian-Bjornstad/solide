@@ -21,7 +21,7 @@ def number(value) -> float | None:
 
 def normalize_assembly(value: str) -> str:
     return {'hg19': 'GRCh37', 'grch37': 'GRCh37', 'hg38': 'GRCh38',
-            'grch38': 'GRCh38'}.get(text(value).lower(), 'Ukjent')
+            'grch38': 'GRCh38'}.get(text(value).lower(), 'Unknown')
 
 
 def load_file(path: Path) -> ImportResult:
@@ -49,7 +49,7 @@ def load_file(path: Path) -> ImportResult:
         tables = [('', rows)]
         hint = metadata.get('sampleNames', '')
     else:
-        raise ValueError('Velg en TSV- eller XLSX-fil.')
+        raise ValueError('Choose a TSV or XLSX file.')
     assembly = normalize_assembly(metadata.get('reference', ''))
     variants = []
     for sheet_name, rows in tables:
@@ -75,7 +75,7 @@ def load_file(path: Path) -> ImportResult:
             if af is not None and 'Allele Frequency' in headers:
                 af = round(af * 100, 10)
             if af is not None and not 0 <= af <= 100:
-                warnings.append(f'Rad {index}: allelfrekvens utenfor 0–100 %.')
+                warnings.append(f'Row {index}: allele frequency outside 0–100%.')
                 af = None
             raw['_sheet'] = sheet_name
             call = text(get('Call', 'Genotype'))
@@ -92,10 +92,10 @@ def load_file(path: Path) -> ImportResult:
                 selected=call.upper().startswith('PRESENT') and text(get('Type')).lower() in
                 {'snp', 'snv', 'del', 'ins', 'indel', 'mnp', 'complex'}, raw=raw))
     if not variants:
-        raise ValueError('Fant ingen varianttabell med Type og Gene/Genes. Kontroller eksportformatet.')
-    if assembly == 'Ukjent':
-        warnings.append('Genomversjon mangler. Bekreft hg19 før genomiske oppslag.')
+        raise ValueError('No variant table with Type and Gene/Genes found. Check the export format.')
+    if assembly == 'Unknown':
+        warnings.append('Assembly missing. Confirm hg19 before genomic searches.')
     if metadata.get('analysisName') and hint and hint not in metadata['analysisName']:
-        warnings.append('Prøvenavn i metadata avviker fra analysenavnet. Bekreft pasienttilknytning.')
-    warnings.append('Coverage vurderes på eksporterte rader; ikke dokumentasjon av hele genets dekning.')
+        warnings.append('Sample metadata differs from the analysis name. Confirm sample identity.')
+    warnings.append('Coverage describes individual exported rows, not whole-gene coverage.')
     return ImportResult(variants, metadata, warnings, assembly, hint)

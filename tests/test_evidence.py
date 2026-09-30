@@ -24,7 +24,7 @@ def test_mane_does_not_swap_accession():
 def test_genomic_query_requires_assembly_and_alleles():
     v=Variant(locus='chr7:123',ref='A',alt='T',assembly='GRCh37')
     assert genomic_query(v)=='chr7-123-A-T'
-    v.assembly='Ukjent'
+    v.assembly='Unknown'
     with pytest.raises(ValueError): genomic_query(v)
 
 def test_evidence_staleness():

@@ -12,15 +12,15 @@ def test_patient_separation_and_qc_on_unselected(tmp_path):
     cells=[c for sh in w for row in sh for c in row if c.value is not None]
     assert not any('PRIVATE-GENE' in str(c.value) for c in cells)
     assert any('Timeout' in str(c.value) for c in cells)
-    assert any('MET'==c.value for row in w['Kvalitet'] for c in row)
+    assert any('MET'==c.value for row in w['Quality'] for c in row)
     assert not any(c.data_type=='f' for c in cells)
-    assert any(c.value==21.1 for row in w['Oversikt'] for c in row)
+    assert any(c.value==21.1 for row in w['Overview'] for c in row)
 
 def test_stale_evidence_is_visible(tmp_path):
     v=Variant(patient='DEMO',gene='MET',selected=True)
     v.evidence['ClinVar']={'status':'found','summary':'OLD','fingerprint':'old'}
     w=load_workbook(export_patient(Session(variants=[v]),'DEMO',tmp_path))
-    assert any('Utdatert' in str(c.value) for row in w['Oversikt'] for c in row)
+    assert any('Outdated' in str(c.value) for row in w['Overview'] for c in row)
 
 def test_filename_cannot_escape_directory(tmp_path):
     patient='../../DEMO'
@@ -43,4 +43,4 @@ def test_report_embeds_current_variant_image_and_full_mtbp_report(tmp_path):
     with zipfile.ZipFile(report) as archive:
         assert len([n for n in archive.namelist() if n.startswith('xl/media/')])==2
     w=load_workbook(report)
-    assert 'MTBP vedlegg 1' in w.sheetnames
+    assert 'MTBP attachment 1' in w.sheetnames

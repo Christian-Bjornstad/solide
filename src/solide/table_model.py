@@ -2,9 +2,9 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal, QSort
 from PyQt6.QtGui import QColor
 from .quality import review_reasons, qc_flags
 
-COLUMNS=[('Valgt','selected'),('Pasient/prøve','patient'),('Gen','gene'),('Transkript','transcript'),
-         ('DNA-endring','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
-         ('Type','kind'),('Call','call'),('Locus','locus'),('Kontrollbehov','review'),('Kommentar','comment')]
+COLUMNS=[('Selected','selected'),('Patient / sample','patient'),('Gene','gene'),('Transcript','transcript'),
+         ('Coding','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
+         ('Type','kind'),('Call','call'),('Locus','locus'),('Review needed','review'),('Comment','comment')]
 
 
 class VariantProxy(QSortFilterProxyModel):
@@ -13,7 +13,7 @@ class VariantProxy(QSortFilterProxyModel):
         self.setSortRole(Qt.ItemDataRole.UserRole)
 
     def set_filters(self,patient,query):
-        self.patient=patient if patient!='Alle pasienter' else ''
+        self.patient=patient if patient!='All patients' else ''
         self.query=query.casefold();self.invalidateFilter()
 
     def filterAcceptsRow(self,row,parent):
@@ -48,10 +48,10 @@ class VariantTableModel(QAbstractTableModel):
             if role==Qt.ItemDataRole.DisplayRole and isinstance(value,float): return f'{value:g}'
             return value if value is not None else ''
         if role==Qt.ItemDataRole.BackgroundRole:
-            if any(f.status=='Feilet' for f in qc_flags(v)):return QColor('#FCE5E3')
+            if any(f.status=='Failed' for f in qc_flags(v)):return QColor('#FCE5E3')
             if review_reasons(v) and not v.nomenclature_verified:return QColor('#FFF2D5')
         if role==Qt.ItemDataRole.ToolTipRole:
-            return f'{v.platform} · kilderad {v.source_row}\nGenom: {v.assembly}\n{v.source_file}'
+            return f'{v.platform} · source row {v.source_row}\nAssembly: {v.assembly}\n{v.source_file}'
     def flags(self,index):
         flags=super().flags(index)
         if index.column()==0:flags|=Qt.ItemFlag.ItemIsUserCheckable

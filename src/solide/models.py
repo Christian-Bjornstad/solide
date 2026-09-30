@@ -22,7 +22,7 @@ class Variant:
     coverage: float | None = None
     copy_number: float | None = None
     variant_id: str = ''
-    assembly: str = 'Ukjent'
+    assembly: str = 'Unknown'
     platform: str = ''
     source_file: str = ''
     source_row: int = 0
@@ -48,7 +48,7 @@ class ImportResult:
     variants: list[Variant]
     metadata: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
-    assembly: str = 'Ukjent'
+    assembly: str = 'Unknown'
     sample_hint: str = ''
 
 

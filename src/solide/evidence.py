@@ -20,18 +20,18 @@ COMPLETE = {'found', 'not_found', 'not_applicable', 'verified'}
 
 def query_record(v: Variant, source: str = '') -> VariantRecord:
     if v.assembly != 'GRCh37':
-        raise ValueError('Bekreft GRCh37/hg19 før oppslag.')
+        raise ValueError('Confirm GRCh37 / hg19 before searching.')
     if v.corrected_hgvs and not v.nomenclature_verified:
-        raise ValueError('Korrigert HGVS må godkjennes før databaseoppslag.')
+        raise ValueError('Approve corrected HGVS before database searches.')
     if ',' in v.gene or ',' in v.transcript:
-        raise ValueError('Flere gener/transkripter: avklar variantidentiteten før oppslag.')
+        raise ValueError('Multiple genes / transcripts: resolve variant identity before searching.')
     reasons = review_reasons(v)
     if 'Mutalyzer' in reasons and not v.nomenclature_verified:
-        raise ValueError('Delins/complex må kontrolleres i Mutalyzer før databaseoppslag.')
+        raise ValueError('Review delins / complex variants in Mutalyzer before database searches.')
     if 'MANE' in reasons:
         target = MANE_TARGETS[v.gene][1]
         if not (v.nomenclature_verified and target in v.corrected_hgvs):
-            raise ValueError(f'Kontroller omregnet HGVS på {target} før databaseoppslag.')
+            raise ValueError(f'Review mapped HGVS on {target} before database searches.')
     hgvsc = ''
     try:
         hgvsc = hgvs_query(v)
@@ -92,9 +92,9 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
               emit, progress, background=True) -> None:
     selected = [v for v in session.variants if v.selected]
     if not selected:
-        raise ValueError('Velg minst én variant i Variantutvalg.')
+        raise ValueError('Select at least one variant in Variants.')
     if any(not v.patient for v in selected):
-        raise ValueError('Alle valgte rader må ha bekreftet pasienttilknytning.')
+        raise ValueError('Confirm patient identity for all selected rows.')
     def store(v, source, evidence):
         evidence.update(fingerprint=v.fingerprint(session.tissue(v.patient)),
                         captured_at=datetime.now(timezone.utc).isoformat(),
@@ -125,7 +125,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                     continue
                 progress(f'{source}: {v.gene} {v.coding}')
                 if source == 'SpliceAI' and 'SpliceAI' not in review_reasons(v):
-                    store(v,source,{'status':'not_applicable','summary':'Utenfor intronregelen ±100 bp.'})
+                    store(v,source,{'status':'not_applicable','summary':'Outside the ±100 bp intronic rule.'})
                     continue
                 try:
                     if source == 'Mutalyzer':
@@ -133,9 +133,9 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                         norm=data['normalization']
                         errors=norm.get('errors') or []
                         status='error' if errors else 'needs_review'
-                        summary=norm.get('normalized_description') or 'Se Mutalyzer-responsen.'
+                        summary=norm.get('normalized_description') or 'See the Mutalyzer response.'
                         if data.get('mapping'):
-                            summary += '\nMANE-forslag: ' + str(data['mapping'].get('mapped_description',data['mapping']))
+                            summary += '\nMANE suggestion: ' + str(data['mapping'].get('mapped_description',data['mapping']))
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'})
                     else:
@@ -188,7 +188,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                     data=asdict(evidence)
                     data['raw']['provisional_status']=data['status']
                     data['status']='partial_capture'
-                    data['summary']+='\nForeløpig fangst; kildeoppslaget er ikke fullført.'
+                    data['summary']+='\nProvisional capture; source search not completed.'
                     store(v,source,data)
             if original_audit is not None:
                 service._write_audit=provisional_audit
@@ -201,7 +201,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             record=mapping[key][0][1]
                             if not record.hgvsc and not record.ref_allele:
                                 data.setdefault('raw',{})['query_basis']='gene_protein_or_identifier'
-                                data['summary']+='\nOppslag på gen/protein eller variant-ID; genomisk identitet ikke bekreftet.'
+                                data['summary']+='\nGene / protein or variant ID search; genomic identity unconfirmed.'
                             store(v,result.database,data)
             try:
                 service.search_variants(records,[source],patient_directory,
@@ -209,7 +209,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                 for vv in active.values():
                     for v in vv:
                         if v.id not in returned:
-                            store(v,source,{'status':'error','summary':'Kilden returnerte ingen variantstatus. Prøv på nytt.'})
+                            store(v,source,{'status':'error','summary':'Source returned no variant status. Retry.'})
             except BrowserReviewCancelled:
                 raise
             except Exception as exc:

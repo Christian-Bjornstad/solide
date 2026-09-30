@@ -19,3 +19,22 @@ def test_variant_selection_filter_and_session(tmp_path):
     window.save_to(tmp_path/'demo.solide.json')
     assert (tmp_path/'demo.solide.json').exists()
     window.close()
+
+
+def test_english_navigation_and_identity_review_tab():
+    from PyQt6.QtWidgets import QTabWidget
+    app=QApplication.instance() or QApplication([])
+    window=MainWindow()
+    assert [window.nav.item(i).text() for i in range(window.nav.count())]==[
+        'Import','Quality','Variants','Sources','Reports','Settings']
+    window.session=Session(variants=[Variant(patient='DEMO',gene='EGFR',coverage=499,source_row=8)])
+    window.refresh();window.nav.setCurrentRow(2);window.show();app.processEvents()
+    window.variant_table.selectRow(0);app.processEvents()
+    assert 'Source:' in window.detail.toPlainText()
+    assert window.qc_model.item(0,3).text()=='Failed'
+    assert 'on row 8' in window.qc_model.item(0,4).text()
+    tabs=window.findChild(QTabWidget)
+    assert tabs.tabText(2)=='Identity review'
+    tabs.setCurrentIndex(2);app.processEvents()
+    assert window.hgvs_edit.isVisible()
+    window.close()

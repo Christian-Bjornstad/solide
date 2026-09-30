@@ -14,24 +14,24 @@ def hgvs_query(v: Variant) -> str:
         return v.coding
     if re.fullmatch(r'(?:NM_|NR_|NC_|NG_)[\w.]+',v.transcript) and v.coding:
         return f'{v.transcript}:{v.coding}'
-    raise ValueError('Transkript/referanse mangler eller er tvetydig. Angi full HGVS for kontroll.')
+    raise ValueError('Missing or ambiguous transcript / reference. Enter full HGVS for review.')
 
 
 def genomic_query(v: Variant) -> str:
     if v.assembly != 'GRCh37':
-        raise ValueError('Genomisk oppslag krever bekreftet GRCh37/hg19.')
+        raise ValueError('Genomic searches require confirmed GRCh37 / hg19.')
     if v.controlled_genomic:
         if not v.nomenclature_verified:
-            raise ValueError('Kontrollert genomisk variant må godkjennes før oppslag.')
+            raise ValueError('Approve the reviewed genomic variant before searching.')
         match=re.fullmatch(r'(?:chr)?([\dXYM]+)-(\d+)-([ACGT]+)-([ACGT]+)',v.controlled_genomic,re.I)
         if not match:
-            raise ValueError('Kontrollert genomisk variant må være chr-pos-REF-ALT.')
+            raise ValueError('Reviewed genomic variant must use chr-pos-REF-ALT.')
         return f'chr{match[1]}-{match[2]}-{match[3].upper()}-{match[4].upper()}'
     if v.corrected_hgvs:
-        raise ValueError('Kontrollert HGVS krever tilsvarende kontrollert GRCh37 chr-pos-REF-ALT for genomiske søk.')
+        raise ValueError('Reviewed HGVS requires matching reviewed GRCh37 chr-pos-REF-ALT for genomic searches.')
     match = re.fullmatch(r'(?:chr)?([\dXYM]+):(\d+)', v.locus, re.I)
     if not match or not re.fullmatch('[ACGT]+', v.ref.upper()) or not re.fullmatch('[ACGT]+', v.alt.upper()):
-        raise ValueError('Genomisk oppslag krever kromosom:posisjon og eksplisitte REF/ALT.')
+        raise ValueError('Genomic searches require chromosome:position and explicit REF/ALT.')
     return f'chr{match[1]}-{match[2]}-{v.ref.upper()}-{v.alt.upper()}'
 
 
@@ -63,7 +63,7 @@ def spliceai_variant(v: Variant, http=None) -> dict:
     if data.get('error') or data.get('errors'):
         raise ValueError(str(data.get('error') or data.get('errors')))
     if data.get('variant') != variant:
-        raise ValueError('SpliceAI-responsen bekreftet ikke den forespurte varianten.')
+        raise ValueError('SpliceAI did not confirm the requested variant.')
     return {'query': variant, 'hg': 37, 'distance': 500, 'mask': 1, 'response': data}
 
 
@@ -73,4 +73,4 @@ def spliceai_summary(data: dict) -> str:
     for row in rows:
         values=[f'{key}={row[key]}' for key in ('DS_AG','DS_AL','DS_DG','DS_DL','DP_AG','DP_AL','DP_DG','DP_DL') if key in row]
         if values:parts.append(str(row.get('gene_name') or row.get('symbol') or row.get('transcript_id') or '')+': '+', '.join(values))
-    return '\n'.join(parts) or 'Ingen scores i responsen; manuell kontroll kreves.'
+    return '\n'.join(parts) or 'No scores returned; manual review required.'

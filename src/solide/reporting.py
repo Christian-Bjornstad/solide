@@ -13,11 +13,12 @@ from openpyxl.utils import get_column_letter
 from .models import Session
 from .quality import qc_flags, review_reasons
 from .evidence import evidence_is_current
+from . import __version__
 
-STATUS = {'found':'Treff', 'verified':'Verifisert', 'not_found':'Ikke funnet',
-          'not_applicable':'Ikke aktuelt', 'needs_review':'Kontroll kreves',
-          'error':'Feil', 'timeout':'Tidsavbrudd', 'identity_mismatch':'Identitet avviker',
-          'partial_capture':'Ufullstendig bilde', 'manual_required':'Manuelt oppslag'}
+STATUS = {'found':'Found', 'verified':'Verified', 'not_found':'Not found',
+          'not_applicable':'Not applicable', 'needs_review':'Review required',
+          'error':'Error', 'timeout':'Timeout', 'identity_mismatch':'Identity mismatch',
+          'partial_capture':'Partial capture', 'manual_required':'Manual search'}
 
 
 def safe_text(value):
@@ -63,53 +64,53 @@ def style_table(sheet, header_row=1):
 def export_patient(session: Session, patient: str, directory: Path) -> Path:
     variants=[v for v in session.variants if v.patient==patient]
     if not variants:
-        raise ValueError('Ingen rader for valgt pasient.')
+        raise ValueError('No rows for this patient.')
     directory=Path(directory)
     directory.mkdir(parents=True,exist_ok=True)
-    stem=re.sub(r'[^\w.-]', '_', patient).strip('.')[:80] or 'pasient'
+    stem=re.sub(r'[^\w.-]', '_', patient).strip('.')[:80] or 'patient'
     # Hash prevents distinct patient labels collapsing to the same sanitized filename.
     path=directory/f'{stem}_{hashlib.sha256(patient.encode()).hexdigest()[:6]}_Solide.xlsx'
     w=Workbook()
-    overview=w.active; overview.title='Oversikt'
-    add_row(overview,['SOLIDE – variantgjennomgang',patient,'Vev',session.tissue(patient)])
-    add_row(overview,['Generert',datetime.now().astimezone().isoformat(),'Appversjon','0.1.0'])
+    overview=w.active; overview.title='Overview'
+    add_row(overview,['SOLIDE – variant review',patient,'Tissue',session.tissue(patient)])
+    add_row(overview,['Generated',datetime.now().astimezone().isoformat(),'App version',__version__])
     assemblies=sorted({v.assembly for v in variants})
-    add_row(overview,['Coverage gjelder eksporterte rader. Genom: '+', '.join(assemblies)+
-                      ('. Kontroll: blandet/ukjent genomversjon.' if len(assemblies)>1 or 'Ukjent' in assemblies else '')])
-    add_row(overview,['Gen','Transkript','Original HGVS','Kontrollert HGVS','Protein','AF (%)','Coverage','Type','Call','Locus','Kontrollstatus','Kommentar','Databasefunn','Genom','Kontrollert genomisk variant'])
+    add_row(overview,['Coverage applies to exported rows. Assembly: '+', '.join(assemblies)+
+                      ('. Review: mixed or unknown assembly.' if len(assemblies)>1 or 'Unknown' in assemblies else '')])
+    add_row(overview,['Gene','Transcript','Original HGVS','Reviewed HGVS','Protein','AF (%)','Coverage','Type','Call','Locus','Review status','Comment','Source findings','Assembly','Reviewed genomic variant'])
     for v in variants:
         if not v.selected:
             continue
         summaries=[]
         for source,e in v.evidence.items():
             current=evidence_is_current(v,e,session.tissue(patient),session)
-            label=STATUS.get(e.get('status'),e.get('status','Ukjent')) if current else 'Utdatert – nytt oppslag kreves'
+            label=STATUS.get(e.get('status'),e.get('status','Unknown')) if current else 'Outdated – rerun required'
             summaries.append(f'{source}: {label} – {e.get("summary", "")}')
         add_row(overview,[v.gene,v.transcript,v.coding,v.corrected_hgvs,v.protein,v.af_percent,
             v.coverage,v.kind,v.call,v.locus,
-            'HGVS kontrollert' if v.nomenclature_verified else ', '.join(review_reasons(v)),
-            v.comment,'\n'.join(summaries) or 'Ingen databaseoppslag utført',v.assembly,v.controlled_genomic])
+            'HGVS reviewed' if v.nomenclature_verified else ', '.join(review_reasons(v)),
+            v.comment,'\n'.join(summaries) or 'No database searches run',v.assembly,v.controlled_genomic])
     style_table(overview,4)
     overview.column_dimensions['M'].width=75
     overview.column_dimensions['L'].width=50
     for row in range(5,overview.max_row+1):
         overview.cell(row,6).number_format='0.00" %"'
         overview.row_dimensions[row].height=max(45,min(150,18*(str(overview.cell(row,13).value).count('\n')+2)))
-    qc=w.create_sheet('Kvalitet')
-    add_row(qc,['Gen','Kategori','Status','Begrunnelse','Coverage','Copy Number','Type','Call','Kilderad','Kildefil'])
+    qc=w.create_sheet('Quality')
+    add_row(qc,['Gene','Category','Status','Reason','Coverage','Copy Number','Type','Call','Source row','Source file'])
     for v in variants:
         for f in qc_flags(v):
             add_row(qc,[v.gene,f.category,f.status,f.message,v.coverage,v.copy_number,v.kind,v.call,v.source_row,Path(v.source_file).name])
     style_table(qc)
     qc.column_dimensions['D'].width=65
-    raw=w.create_sheet('Rådata')
+    raw=w.create_sheet('Raw data')
     keys=sorted({k for v in variants for k in v.raw})
-    add_row(raw,['Rad-ID','Valgt','Kilderad','Kildefil','Genom',*keys])
+    add_row(raw,['Row ID','Selected','Source row','Source file','Assembly',*keys])
     for v in variants:
         add_row(raw,[v.id,v.selected,v.source_row,Path(v.source_file).name,v.assembly,*[v.raw.get(k) for k in keys]])
     style_table(raw)
-    audit=w.create_sheet('Oppslag')
-    add_row(audit,['Rad-ID','Gen','Kilde','Status','Tidspunkt','Vev','URL','Oppsummering','JSON-resultat'])
+    audit=w.create_sheet('Searches')
+    add_row(audit,['Row ID','Gene','Source','Status','Captured at','Tissue','URL','Summary','JSON result'])
     used_names=set(w.sheetnames)
     full_reports=set()
     for v in variants:
@@ -122,13 +123,13 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
         used_names.add(candidate)
         detail=w.create_sheet(candidate)
         add_row(detail,[v.gene,v.corrected_hgvs or v.coding,v.protein])
-        add_row(detail,['Kommentar',v.comment])
+        add_row(detail,['Comment',v.comment])
         detail.column_dimensions['A'].width=28
         detail.column_dimensions['B'].width=90
         cursor=4
         for source,e in v.evidence.items():
             current=evidence_is_current(v,e,session.tissue(patient),session)
-            state=e.get('status','Ukjent') if current else 'Utdatert'
+            state=e.get('status','Unknown') if current else 'Outdated'
             add_row(audit,[v.id,v.gene,source,state,e.get('captured_at'),e.get('tissue'),e.get('url'),e.get('summary'),json.dumps(e.get('raw',{}),ensure_ascii=False,default=str)])
             detail.cell(cursor,1,safe_text(source));detail.cell(cursor,2,safe_text(state));cursor+=1
             detail.cell(cursor,2,safe_text(e.get('summary',''))).alignment=Alignment(wrap_text=True)
@@ -145,7 +146,7 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
                 if not current:
                     continue
                 if not image_path.is_file():
-                    detail.cell(cursor,2,'Skjermbilde mangler: nytt bilde kreves');cursor+=1
+                    detail.cell(cursor,2,'Screenshot missing: capture again');cursor+=1
                     continue
                 try:
                     image=Image(str(image_path))
@@ -155,19 +156,19 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
                     detail.add_image(image,f'A{cursor}')
                     cursor+=int(image.height/20)+2
                 except (OSError,ValueError):
-                    detail.cell(cursor,2,'Skjermbildet kunne ikke leses.');cursor+=1
+                    detail.cell(cursor,2,'Screenshot could not be read.');cursor+=1
             full=data.get('patient_report_screenshot')
             if full and current and full not in full_reports:
                 full_reports.add(full)
-                attachment=w.create_sheet(f'MTBP vedlegg {len(full_reports)}')
-                attachment.cell(1,1,'MTBP – full rapport')
+                attachment=w.create_sheet(f'MTBP attachment {len(full_reports)}')
+                attachment.cell(1,1,'MTBP – full report')
                 attachment.cell(2,1,safe_text(e.get('captured_at','')))
                 if Path(full).is_file():
                     try:
                         image=Image(full);scale=min(1,1000/image.width)
                         image.width*=scale;image.height*=scale;attachment.add_image(image,'A4')
-                    except (OSError,ValueError):attachment.cell(4,1,'Full rapport kunne ikke leses.')
-                else:attachment.cell(4,1,'Full rapport mangler. Ny fangst kreves.')
+                    except (OSError,ValueError):attachment.cell(4,1,'Full report could not be read.')
+                else:attachment.cell(4,1,'Full report missing. Capture again.')
         detail.sheet_view.showGridLines=False
         detail.freeze_panes='B4'
     style_table(audit)

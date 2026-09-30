@@ -1,49 +1,49 @@
-# Verifikasjon – Solide v0.1.0
+# Verification — Solide v0.2.0
 
-Dato: 30. september 2026.
+Date: 30 September 2026.
 
-## Utført
+## Verified
 
-- `python -m pytest -q`: 46 tester bestått.
-- `python -m compileall -q src install_python_felles.py start_python_felles.py`: bestått.
-- Virkelige lokale kildefiler kontrollert med 8 Ion-rader, 2 Genexus TSV-rader
-  og 3204 Genexus XLSX-datarader. QC gjengir 4 CNV-feil, 5 NO CALL tiles og
-  4 RNAExonVariant ABSENT.
-- Native GUI-test: importert øktmodell, QC-visning, søk, avkrysning og øktlagring.
-- Excel: pasientskille, alle-rad-QC, prosentverdier, formelbeskyttelse, genomversjon,
-  utdatert evidens, bilder og full MTBP-rapport i arbeidsboken.
-- Queue: pseudonyme eksterne records, separate pasientbatcher, manglende
-  provider-respons som feil, foreløpig fangst ved avbrudd og komplett valgt
-  MTBP-batch ved gjenopptak.
-- Nomenklatur: kontrollert HGVS blandes ikke med gamle alleler; kontrollert
-  intronoffset styrer SpliceAI; flergene-/MANE-/delins-avvik sperres for oppslag.
-- Kopierte Edge/genomiske runtime-regresjoner passerer under Solides namespace.
-- `scripts/verify_capture_locally.py`: ekte lokal Edge, syntetiske HTML-sider,
-  screenshot-klipping ved zoom 1/1.25/0.8, nested scroll, riktig MTBP-variantrad
-  og Franklin-genheader. Alle sjekker bestått.
-- Native UI-skjermbilde laget og visuelt kontrollert med syntetiske demodata.
-- Appen startet med normal Windows-plattform via start_python_felles.py;
-  prosessvinduet har tittelen «Solide | Variantgjennomgang».
-- Uavhengig kodegjennomgang: funn om kontrollert HGVS, MTBP-batchferskhet,
-  SpliceAI-utvalg og genomversjon i rapport er rettet med regresjonstester.
+- `python -m pytest -q`: 48 tests passed on Windows / Python 3.12.
+- `python -m compileall -q src install_python_felles.py start_python_felles.py`: passed.
+- Local input formats: 8 Ion rows, 2 Genexus TSV rows and 3204 Genexus XLSX
+  rows. Quality rules reproduce 4 failed CNVs, 5 NO CALL tiles and 4
+  RNAExonVariant ABSENT statuses. Input files remain untracked.
+- Native GUI: filtering, selection, QC, session saving, English navigation,
+  detail labels and identity review. All six pages fit at 1050×700; synthetic
+  previews inspected at full and compact sizes.
+- Legacy sessions with Norwegian unknown-assembly labels load correctly;
+  comments and raw source data are preserved.
+- Excel: patient separation, all-row QC, percentages, formula protection,
+  assembly provenance, outdated evidence, embedded variant images and MTBP
+  full report. Workbook headings and statuses are English.
+- Queue: pseudonymous external records, separate patient batches, missing
+  responses as errors, partial capture on interruption and complete selected
+  MTBP batch on resume.
+- Nomenclature: reviewed HGVS does not reuse old alleles; reviewed intronic
+  offsets control SpliceAI; multiple genes, MANE differences and delins block
+  ordinary searches until reviewed.
+- Pinned Edge / genomic runtime regression tests pass.
+- Previous local Edge capture verification used synthetic HTML only:
+  zoom 1 / 1.25 / 0.8, nested scrolling, exact MTBP variant row and Franklin
+  gene header. These runtime paths were unchanged by the UI update.
+- Independent code review found no important regressions. Minor copy issues
+  were corrected.
+- Public-content audit: Git history contains no input TSV/XLSX files, sessions,
+  browser profiles or embedded credentials. Targeted sample-ID and private-key /
+  token checks passed. The published UI image contains synthetic data only.
 
-## Ikke verifisert
+## Still requires a laboratory pilot
 
-- Ingen pasientvarianter er sendt til databaseleverandørene.
-- Live kontoer, tilgang, leverandørsider og MTBP Other er ikke prøvd i en
-  autentisert ende-til-ende-kjøring.
-- Python FELLES, Ivanti app-ID 15694, proxy og Edge-policy må prøves på jobb-PC.
-- MANE-omregning er implementert som forslag fra Mutalyzer med manuell
-  godkjenning; laboratoriets transkriptvalg og nomenklatur må faglig valideres.
-- QC gjelder eksporterte rader, ikke heldekkende gen-QC. Pakke-/genliste og
-  endelig håndtering av CNV =1 må fortsatt defineres av laboratoriet.
-- Kommentarer fra en manuelt endret eksportert Excel-fil importeres ikke tilbake;
-  varige kommentarer føres i appens arbeidsøkt.
+Authenticated live database pages, MTBP Other, institutional access, proxy,
+Edge policies, Python FELLES and Ivanti app ID 15694 require testing on the work PC.
+No patient variants were sent to external providers during development.
 
-## Pilot
+Mutalyzer mapping is a suggestion requiring manual approval. Transcript choices
+and nomenclature require professional validation. QC covers exported rows;
+whole-gene coverage, panel membership and the final CNV =1 rule must be defined
+by the laboratory. Exported Excel edits are not imported back.
 
-Start appen, velg godkjent arbeidsmappe, importer én kjent prøve og bekreft
-identitet/hg19. Sammenlign QC og variantutvalg med arbeidsskjemaet. Logg inn
-i aktuelle databaser via Edge, kjør et lite utvalg, kontroller identitet og bilder,
-og sammenlign generert Excel med manuell rapport. Prøv også stopp/gjenopptak
-og regenerering etter endret utvalg. Ingen klinisk godkjenning hevdes her.
+For a pilot, compare a known sample's import, QC and selection with the manual
+worksheet, then check a small database batch and its screenshots. Verify identity,
+tissue, generated Excel and stop / resume behaviour before clinical use.

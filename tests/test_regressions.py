@@ -32,10 +32,10 @@ def test_mtbp_batch_freshness_changes_with_selection():
     assert not evidence_is_current(a,evidence,'Other',s)
 
 def test_report_contains_genome_assembly(tmp_path):
-    v=Variant(patient='DEMO',gene='MET',selected=True,assembly='Ukjent')
+    v=Variant(patient='DEMO',gene='MET',selected=True,assembly='Unknown')
     w=load_workbook(export_patient(Session(variants=[v]),'DEMO',tmp_path))
-    assert any('Genom' in str(c.value) for row in w['Oversikt'] for c in row)
-    assert any('Ukjent'==c.value for row in w['Oversikt'] for c in row)
+    assert any('Assembly' in str(c.value) for row in w['Overview'] for c in row)
+    assert any('Unknown'==c.value for row in w['Overview'] for c in row)
 
 def test_queue_batches_patients_and_preserves_checkpoint(monkeypatch,tmp_path):
     from solide._vendor.archer.core.models import DatabaseEvidence

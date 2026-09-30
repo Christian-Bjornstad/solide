@@ -21,20 +21,20 @@ def qc_flags(v: Variant) -> list[QualityFlag]:
     flags = []
     kind = kind_key(v.kind)
     if v.coverage is not None and v.coverage < 500:
-        flags.append(QualityFlag('Coverage', 'Feilet', f'Coverage {v.coverage:g} <500 på rad {v.source_row}.'))
+        flags.append(QualityFlag('Coverage', 'Failed', f'Coverage {v.coverage:g} <500 on row {v.source_row}.'))
     elif v.coverage is None and kind in {'snv', 'snp', 'indel', 'del', 'ins', 'mnp', 'complex'}:
-        flags.append(QualityFlag('Coverage', 'Ukjent', 'Coverage mangler eller er ikke numerisk.'))
+        flags.append(QualityFlag('Coverage', 'Unknown', 'Coverage missing or not numeric.'))
     if kind == 'cnv':
         if v.copy_number is None:
-            flags.append(QualityFlag('CNV', 'Ukjent', 'Copy Number mangler eller er ikke numerisk.'))
+            flags.append(QualityFlag('CNV', 'Unknown', 'Copy Number missing or not numeric.'))
         elif v.copy_number < 1:
-            flags.append(QualityFlag('CNV', 'Feilet', f'Copy Number {v.copy_number:g} <1.'))
+            flags.append(QualityFlag('CNV', 'Failed', f'Copy Number {v.copy_number:g} <1.'))
         elif v.copy_number == 1:
-            flags.append(QualityFlag('CNV – kontroll', 'Kontroll', 'Copy Number =1; grenseverdien må vurderes.'))
+            flags.append(QualityFlag('CNV review', 'Review', 'Copy Number =1; review the boundary value.'))
     if kind == 'rnaexontiles' and v.call.upper() == 'NO CALL':
-        flags.append(QualityFlag('Uttrykksubalanse', 'Feilet', 'RNAExonTiles: NO CALL.'))
+        flags.append(QualityFlag('Expression imbalance', 'Failed', 'RNAExonTiles: NO CALL.'))
     if kind == 'rnaexonvariant' and v.call.upper() == 'ABSENT':
-        flags.append(QualityFlag('RNAExonVariant', 'Rapporteres', 'RNAExonVariant: ABSENT.'))
+        flags.append(QualityFlag('RNAExonVariant', 'Report', 'RNAExonVariant: ABSENT.'))
     return flags
 
 
@@ -49,5 +49,5 @@ def review_reasons(v: Variant) -> list[str]:
     if target and (target[0] in v.transcript or not v.transcript):
         reasons.append('MANE')
     if ',' in v.transcript or ',' in v.gene:
-        reasons.append('Flere transkripter/gener')
+        reasons.append('Multiple transcripts / genes')
     return reasons
