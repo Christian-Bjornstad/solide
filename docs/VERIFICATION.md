@@ -1,16 +1,17 @@
-# Verification — Solide v0.2.0
+# Verification — Solide v0.3.0
 
 Date: 30 September 2026.
 
 ## Verified
 
-- `python -m pytest -q`: 48 tests passed on Windows / Python 3.12.
+- `python -m pytest -q`: 63 tests passed on Windows / Python 3.12.
 - `python -m compileall -q src install_python_felles.py start_python_felles.py`: passed.
 - Local input formats: 8 Ion rows, 2 Genexus TSV rows and 3204 Genexus XLSX
   rows. Quality rules reproduce 4 failed CNVs, 5 NO CALL tiles and 4
   RNAExonVariant ABSENT statuses. Input files remain untracked.
 - Native GUI: filtering, selection, QC, session saving, English navigation,
-  detail labels and identity review. All six pages fit at 1050×700; synthetic
+  detail labels and identity review. Four destinations at 1050×700; Settings
+  uses scrolling instead of compressing account fields. Synthetic
   previews inspected at full and compact sizes.
 - Legacy sessions with Norwegian unknown-assembly labels load correctly;
   comments and raw source data are preserved.
@@ -29,6 +30,17 @@ Date: 30 September 2026.
   gene header. These runtime paths were unchanged by the UI update.
 - Independent code review found no important regressions. Minor copy issues
   were corrected.
+- New workflow tests cover retry-only targets, forced reruns preserving other
+  sources, full MTBP batches for ambiguous results, partial-capture progress,
+  archived prior evidence, credential redaction, vault-only password storage,
+  and visible Edge sign-in fallback when vault lookup fails.
+- Actual Windows Credential Manager write/read/delete round-trip passed with
+  a temporary synthetic account; the test credential was removed afterwards.
+- Match assessment distinguishes returned genomic identity evidence from a
+  result requiring manual identity review; absent or unreadable screenshots are
+  retryable. Reports include the assessment.
+- Screenshot validation is cached by absolute path, modification time and size;
+  a regression confirms that changed files are revalidated.
 - Public-content audit: Git history contains no input TSV/XLSX files, sessions,
   browser profiles or embedded credentials. Targeted sample-ID and private-key /
   token checks passed. The published UI image contains synthetic data only.

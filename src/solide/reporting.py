@@ -12,13 +12,15 @@ from openpyxl.drawing.image import Image
 from openpyxl.utils import get_column_letter
 from .models import Session
 from .quality import qc_flags, review_reasons
-from .evidence import evidence_is_current
+from .evidence import evidence_is_current, assess_evidence
 from . import __version__
 
 STATUS = {'found':'Found', 'verified':'Verified', 'not_found':'Not found',
           'not_applicable':'Not applicable', 'needs_review':'Review required',
           'error':'Error', 'timeout':'Timeout', 'identity_mismatch':'Identity mismatch',
-          'partial_capture':'Partial capture', 'manual_required':'Manual search'}
+          'partial_capture':'Partial capture', 'manual_required':'Manual search',
+          'login_required':'Sign-in required','verification_required':'Review required',
+          'authentication_failed':'Sign-in failed','network_error':'Network error','ambiguous_result':'Ambiguous match'}
 
 
 def safe_text(value):
@@ -84,7 +86,7 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
         summaries=[]
         for source,e in v.evidence.items():
             current=evidence_is_current(v,e,session.tissue(patient),session)
-            label=STATUS.get(e.get('status'),e.get('status','Unknown')) if current else 'Outdated – rerun required'
+            label=assess_evidence(v,e,session).label
             summaries.append(f'{source}: {label} – {e.get("summary", "")}')
         add_row(overview,[v.gene,v.transcript,v.coding,v.corrected_hgvs,v.protein,v.af_percent,
             v.coverage,v.kind,v.call,v.locus,
@@ -110,7 +112,7 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
         add_row(raw,[v.id,v.selected,v.source_row,Path(v.source_file).name,v.assembly,*[v.raw.get(k) for k in keys]])
     style_table(raw)
     audit=w.create_sheet('Searches')
-    add_row(audit,['Row ID','Gene','Source','Status','Captured at','Tissue','URL','Summary','JSON result'])
+    add_row(audit,['Row ID','Gene','Source','Status','Captured at','Tissue','URL','Summary','JSON result','Match assessment'])
     used_names=set(w.sheetnames)
     full_reports=set()
     for v in variants:
@@ -130,8 +132,10 @@ def export_patient(session: Session, patient: str, directory: Path) -> Path:
         for source,e in v.evidence.items():
             current=evidence_is_current(v,e,session.tissue(patient),session)
             state=e.get('status','Unknown') if current else 'Outdated'
-            add_row(audit,[v.id,v.gene,source,state,e.get('captured_at'),e.get('tissue'),e.get('url'),e.get('summary'),json.dumps(e.get('raw',{}),ensure_ascii=False,default=str)])
+            assessment=assess_evidence(v,e,session)
+            add_row(audit,[v.id,v.gene,source,state,e.get('captured_at'),e.get('tissue'),e.get('url'),e.get('summary'),json.dumps(e.get('raw',{}),ensure_ascii=False,default=str),assessment.label])
             detail.cell(cursor,1,safe_text(source));detail.cell(cursor,2,safe_text(state));cursor+=1
+            detail.cell(cursor,1,'Match assessment');detail.cell(cursor,2,safe_text(assessment.label));cursor+=1
             detail.cell(cursor,2,safe_text(e.get('summary',''))).alignment=Alignment(wrap_text=True)
             detail.row_dimensions[cursor].height=60;cursor+=1
             url=e.get('url','')
