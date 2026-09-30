@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solide"
+version = "0.1.0"
+description = "Lokal arbeidsflate for variantgjennomgang i solide svulster"
+requires-python = ">=3.11"
+dependencies = ["PyQt6>=6.7", "openpyxl>=3.1", "requests>=2.32", "Pillow>=10", "websocket-client>=1.8", "keyring>=25", "reportlab>=4", "pandas>=2.2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+solide = "solide.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
