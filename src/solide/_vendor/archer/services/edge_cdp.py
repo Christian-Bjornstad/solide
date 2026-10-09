@@ -1015,7 +1015,10 @@ def _ensure_profile_idle(profile_directory: Path) -> None:
             "untouched and ask IT to inspect it."
         ) from exc
     try:
-        _http_json(f"http://127.0.0.1:{existing_port}/json/version", timeout=0.5)
+        # Windows can take just over two seconds to reject a closed loopback
+        # listener. Allow the explicit refusal to arrive; a timeout still
+        # leaves occupancy uncertain and must never permit profile reuse.
+        _http_json(f"http://127.0.0.1:{existing_port}/json/version", timeout=3)
     except (EdgeCdpError, EdgeCdpTimeout) as exc:
         if _is_connection_refused(exc):
             return
