@@ -170,3 +170,22 @@ def test_assessment_dialog_saves_into_app_session(monkeypatch,tmp_path):
     assert load_session(window.session_path).variants[0].report_decision=='Include'
     assert window.session.history[-1]['event']=='assessment'
     window.close()
+
+
+def test_open_session_path_uses_persisted_data_without_demo_rows(tmp_path):
+    from solide.session import save_session
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    path=tmp_path/'existing.solide.json';save_session(Session(variants=[Variant(patient='SOURCE',gene='MET')]),path)
+    window.load_session_path(path)
+    assert window.variant_model.rowCount()==1 and window.session.variants[0].patient=='SOURCE'
+    assert window.session_path==path and not window.dirty
+    window.close()
+
+
+def test_failed_import_is_visible_and_does_not_claim_success():
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    window.accept_import([('unsupported.xlsx',None,'No variant table found.')])
+    assert 'failed' in window.banner.text().lower()
+    assert 'Import failed: No variant table found.' in window.queue_log.toPlainText()
+    assert not window.dirty and not window.session.variants
+    window.close()

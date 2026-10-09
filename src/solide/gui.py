@@ -7,12 +7,12 @@ import re
 import time
 import uuid
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QSize, QByteArray, QTimer
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QDesktopServices, QFontDatabase, QIcon, QPixmap, QPainter
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QDesktopServices, QFontDatabase, QIcon, QPixmap, QPainter,QFont
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QListWidget, QStackedWidget, QFileDialog, QMessageBox, QLineEdit,
     QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
-    QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout)
+    QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
 from .importing import load_file
 from .quality import qc_flags, review_reasons
@@ -22,19 +22,25 @@ from .reporting import export_patient, STATUS
 from .evidence import SOURCES, QueueControl, run_queue, evidence_is_current
 from .evidence import build_search_plan, assess_evidence, source_applies
 from .assessment import AssessmentDialog,save_assessment
+from .appearance import light_palette,text_pixels
 from .accounts import ACCOUNT_PROVIDERS, browser_credentials, read_password, write_password, remove_password
 from .activity import ActivityLog
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
 
 STYLE='''
-QWidget { font-family: "Segoe UI"; font-size: 14px; color: #243128; }
+QWidget { font-family: "Segoe UI"; font-size: 16px; color: #243128; }
 QMainWindow, QStackedWidget { background: #F5F7F4; }
+QDialog, QMessageBox, QMenu { background: white; color: #243128; }
+QComboBox QAbstractItemView { background: white; color: #243128; selection-background-color: #425B3D; selection-color: white; border: 1px solid #CBD5C5; padding: 4px; }
+QComboBox QAbstractItemView::item { min-height: 32px; padding: 4px 8px; }
+QMenu::item { padding: 10px 18px; }
+QMenu::item:selected { background: #425B3D; color: white; }
 QWidget#rail { background: white; border-right: 1px solid #E1E7DE; }
 QLabel#brand { color: #425B3D; font-size: 25px; font-weight: 700; letter-spacing: 2px; }
-QLabel#railNote { color: #596454; font-size: 12px; }
+QLabel#railNote { color: #596454; font-size: 14px; }
 QLabel#title { font-size: 28px; font-weight: 600; }
 QLabel#subtitle { color: #53634D; background: #EAF0E6; padding: 9px 14px; border-radius: 8px; }
-QLabel#status { color: #596454; font-size: 12px; padding-top: 8px; }
+QLabel#status { color: #596454; font-size: 14px; padding-top: 8px; }
 QListWidget#nav { background: transparent; border: 0; outline: 0; }
 QListWidget#nav::item { padding: 13px 10px; margin: 4px 0; border-radius: 8px; }
 QListWidget#nav::item:selected { background: #425B3D; color: white; font-weight: 600; }
@@ -45,7 +51,8 @@ QPushButton:focus, QLineEdit:focus, QComboBox:focus, QTableView:focus { border: 
 QPushButton#primary { background: #425B3D; color: white; border-color: #425B3D; font-weight: 600; }
 QPushButton#primary:hover { background: #34492F; }
 QPushButton:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
-QLineEdit, QComboBox { background: white; border: 1px solid #CBD5C5; padding: 10px; border-radius: 8px; min-height: 20px; }
+QLineEdit, QComboBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
+QLineEdit { placeholder-text-color: #596454; }
 QTextEdit, QPlainTextEdit, QTableView { background: white; border: 1px solid #DEE5DA; border-radius: 8px; selection-background-color: #DCE8D5; selection-color: #1F2A22; }
 QTextEdit, QPlainTextEdit { padding: 10px; }
 QTableView { alternate-background-color: #FAFBF9; gridline-color: #EEF1EB; }
@@ -60,8 +67,8 @@ QSplitter::handle { background: #E1E7DE; }
 QToolTip { background: #243128; color: white; border: 0; padding: 8px; }
 QCheckBox { spacing: 8px; padding: 5px; }
 QCheckBox::indicator { width: 17px; height: 17px; }
-QProgressBar { border: 1px solid #D6DED2; background: white; height: 8px; border-radius: 4px; }
-QProgressBar::chunk { background: #425B3D; }
+QProgressBar { border: 1px solid #D6DED2; background: white; color: #243128; min-height: 30px; border-radius: 4px; text-align: center; }
+QProgressBar::chunk { background: #C3D5B9; }
 '''
 
 
@@ -131,7 +138,7 @@ class MainWindow(QMainWindow):
         try:self.config=json.loads(self.config_path.read_text(encoding='utf8'))
         except (OSError,ValueError):self.config={}
         self.setWindowTitle('Solide | Variant review');self.resize(1440,940)
-        self.setMinimumSize(1050,700);self.setStyleSheet(STYLE)
+        self.setMinimumSize(1050,700);self.setPalette(light_palette());self.setStyleSheet(STYLE)
         central=QWidget();self.setCentralWidget(central)
         horizontal=QHBoxLayout(central);horizontal.setContentsMargins(0,0,0,0);horizontal.setSpacing(0)
         rail=QWidget();rail.setObjectName('rail');rail.setFixedWidth(190)
@@ -172,6 +179,7 @@ class MainWindow(QMainWindow):
         self.log_toggle.toggled.connect(self.queue_log.setVisible)
         self.run_timer=QTimer(self);self.run_timer.setInterval(1000);self.run_timer.timeout.connect(self.update_run_status)
         self.nav.currentRowChanged.connect(self.navigate);self.nav.setCurrentRow(0)
+        self.apply_appearance()
         self.refresh()
         self.record_activity('Application started')
 
@@ -225,7 +233,7 @@ class MainWindow(QMainWindow):
 
     def build_variants(self):
         layout=self.page();row=QHBoxLayout()
-        self.search=QLineEdit();self.search.setPlaceholderText('Search gene, HGVS or sample…')
+        self.search=QLineEdit();self.search.setPlaceholderText('Gene, HGVS or sample…')
         self.search.setAccessibleName('Search variants');row.addWidget(self.search,1)
         self.patient_filter=QComboBox();self.patient_filter.setAccessibleName('Filter patient');row.addWidget(self.patient_filter)
         row.addWidget(self.button('Select visible',lambda:self.select_visible(True)))
@@ -287,8 +295,10 @@ class MainWindow(QMainWindow):
         self.pause_btn=self.button('Pause',self.pause_queue);self.pause_btn.setEnabled(False);row.addWidget(self.pause_btn)
         self.stop_btn=self.button('Stop',self.stop_queue);self.stop_btn.setEnabled(False);row.addWidget(self.stop_btn)
         self.retry_btn=self.button('Retry failed',lambda:self.start_queue('failed'));row.addWidget(self.retry_btn)
-        self.rerun_btn=self.button('Rerun selected',self.rerun_selected);row.addWidget(self.rerun_btn)
-        self.rerun_all_btn=self.button('Rerun all',lambda:self.start_queue('all'));row.addWidget(self.rerun_all_btn);row.addStretch()
+        rerun_menu=QMenu(self)
+        self.rerun_btn=rerun_menu.addAction('Selected results');self.rerun_btn.triggered.connect(self.rerun_selected)
+        self.rerun_all_btn=rerun_menu.addAction('All selected variants');self.rerun_all_btn.triggered.connect(lambda:self.start_queue('all'))
+        self.rerun_menu_btn=self.button('Rerun…',lambda:None);self.rerun_menu_btn.setMenu(rerun_menu);row.addWidget(self.rerun_menu_btn);row.addStretch()
         self.retry_btn.setToolTip('Retry failed searches only. MTBP regenerates the complete selected patient batch.')
         self.rerun_btn.setToolTip('Rerun highlighted result rows, including completed searches. MTBP regenerates the complete selected patient batch.')
         layout.addLayout(row)
@@ -325,6 +335,11 @@ class MainWindow(QMainWindow):
         self.output_dir=QLineEdit(self.config.get('output_dir',''));row.addWidget(self.output_dir,1)
         row.addWidget(self.button('Browse…',self.choose_directory));form.addRow('Workspace folder',folder)
         self.background=QCheckBox('Minimise automated Edge windows');self.background.setChecked(self.config.get('background',True));form.addRow(self.background)
+        self.text_size=QComboBox()
+        for label,value in [('Compact (14 px)',14),('Standard (16 px)',16),('Large (18 px)',18),('Extra large (20 px)',20)]:self.text_size.addItem(label,value)
+        self.text_size.setCurrentIndex(self.text_size.findData(text_pixels(self.config.get('text_size',16))))
+        self.text_size.currentIndexChanged.connect(self.apply_appearance)
+        form.addRow('Text size',self.text_size)
         form.addRow(self.button('Save settings',self.save_settings))
         layout.addWidget(box)
         self.output_dir.setToolTip('Use an approved local folder for reports and evidence.')
@@ -353,6 +368,26 @@ class MainWindow(QMainWindow):
     def navigate(self,index):
         self.pages.setCurrentIndex(index);self.title.setText(self.nav.item(index).text())
 
+    def apply_appearance(self,*args):
+        pixels=text_pixels(self.text_size.currentData())
+        font=QFont('Segoe UI');font.setPixelSize(pixels);self.setFont(font)
+        self.setPalette(light_palette())
+        self.setStyleSheet(STYLE.replace('font-size: 16px',f'font-size: {pixels}px'))
+        for combo in self.findChildren(QComboBox):combo.view().setPalette(light_palette())
+        for view in (self.variant_table,self.qc_table,self.evidence_table):
+            view.verticalHeader().setDefaultSectionSize(max(40,pixels+24))
+        self.progress.setMinimumHeight(max(32,pixels+16))
+        self.fit_table_headers()
+
+    def fit_table_headers(self):
+        # Keep header labels and sorting arrows readable at every text size.
+        for view in (self.variant_table,self.qc_table,self.evidence_table):
+            header=view.horizontalHeader();model=view.model()
+            for column in range(model.columnCount()):
+                label=str(model.headerData(column,Qt.Orientation.Horizontal) or '')
+                minimum=header.fontMetrics().horizontalAdvance(label)+40
+                if view.columnWidth(column)<minimum:view.setColumnWidth(column,minimum)
+
     def notify_error(self,message):
         self.record_activity('Error: '+message)
         if isinstance(self.active,EvidenceWorker):self.run_state='Failed';self.update_run_status()
@@ -362,7 +397,7 @@ class MainWindow(QMainWindow):
         for widget in (self.import_btn,self.open_btn,self.run_btn,self.login_btn,self.report_btn,
                        self.assessment_btn,self.variant_table,self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit,
                        self.verified_check,self.output_dir,self.background,self.tissue,
-                       self.retry_btn,self.rerun_btn,self.rerun_all_btn,self.account_save_btn,self.account_clear_btn,
+                       self.retry_btn,self.rerun_btn,self.rerun_all_btn,self.rerun_menu_btn,self.account_save_btn,self.account_clear_btn,
                        self.account_username,self.account_password,self.login_source):
             widget.setEnabled(not value)
         self.save_btn.setEnabled(not value)
@@ -401,8 +436,13 @@ class MainWindow(QMainWindow):
         self.banner.setText('Reading files…')
 
     def accept_import(self,results):
+        imported=failed=skipped=rows_added=0
         for path,result,error in results:
-            if error:self.import_log.appendPlainText(f'Import failed: {error}');continue
+            if error:
+                failed+=1
+                message=f'Import failed: {error}'
+                self.import_log.appendPlainText(message);self.record_activity(message)
+                continue
             dialog=QDialog(self);dialog.setWindowTitle('Confirm sample');dialog.resize(620,330)
             form=QFormLayout(dialog);info=QLabel(f'{Path(path).name}\n{len(result.variants)} rows. Confirm the sample below.');info.setWordWrap(True);form.addRow(info)
             patient=QLineEdit(result.sample_hint);form.addRow('Patient / sample ID',patient)
@@ -411,20 +451,29 @@ class MainWindow(QMainWindow):
             warnings=QLabel('\n'.join(result.warnings));warnings.setWordWrap(True);form.addRow(warnings)
             buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
             buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
-            if dialog.exec()!=QDialog.DialogCode.Accepted:continue
-            if not patient.text().strip():self.notify_error('Enter a patient / sample ID.');continue
+            if dialog.exec()!=QDialog.DialogCode.Accepted:skipped+=1;continue
+            if not patient.text().strip():
+                failed+=1;self.notify_error('Enter a patient / sample ID.');continue
             existing={v.id for v in self.session.variants}
             added=0
             for v in result.variants:
                 if v.id in existing:continue
                 v.patient=patient.text().strip();v.assembly=assembly.currentText()
                 self.session.variants.append(v);added+=1
+            imported+=1;rows_added+=added
             self.session.history.append({'event':'import','time':datetime.now().astimezone().isoformat(),
                                          'file':path,'rows':added,'patient':patient.text().strip()})
             self.import_log.appendPlainText(f'{added} rows imported; {len(result.variants)-added} duplicates skipped.\n'+'\n'.join(result.warnings))
             self.record_activity(f'Imported {added} rows; {len(result.variants)-added} duplicates skipped')
             for warning in result.warnings:self.record_activity(warning)
-        self.mark_dirty();self.refresh();self.banner.setText('Imported. Review Quality and Variants.')
+        if imported:self.mark_dirty();self.refresh()
+        if imported:
+            message=f'Imported {rows_added:,} rows from {imported} files'
+            if failed:message+=f' · {failed} failed (see Log)'
+            if skipped:message+=f' · {skipped} skipped'
+        elif failed:message=f'Import failed for {failed} files. Open Log for details.'
+        else:message='Import cancelled'
+        self.banner.setText(message)
 
     def refresh(self):
         self.variant_model.set_variants(self.session.variants)
@@ -446,6 +495,7 @@ class MainWindow(QMainWindow):
         self.variant_table.setColumnWidth(0,88);self.variant_table.setColumnWidth(1,145);self.variant_table.setColumnWidth(2,95)
         self.variant_table.setColumnWidth(3,150);self.variant_table.setColumnWidth(4,200)
         self.qc_table.setColumnWidth(4,430)
+        self.fit_table_headers()
 
     def refresh_counts(self):
         total=len(self.session.variants);selected=sum(v.selected for v in self.session.variants)
@@ -564,6 +614,7 @@ class MainWindow(QMainWindow):
                 row[0].setData((v.id,source),Qt.ItemDataRole.UserRole+1)
                 self.evidence_model.appendRow(row)
         for i,width in enumerate((125,230,100,145,155,400)):self.evidence_table.setColumnWidth(i,width)
+        self.fit_table_headers()
         self.result_counts.setText(f"{counts['Verified match']} verified · {counts['Review match']} to review · {counts['attention']} need attention · {counts['Pending']} pending")
         selection=self.evidence_table.selectionModel()
         from PyQt6.QtCore import QItemSelectionModel
@@ -676,12 +727,17 @@ class MainWindow(QMainWindow):
                 self.banner.setText('Save failed. Results remain in memory; save to another file.');return False
         return False
 
+    def load_session_path(self,path):
+        session=load_session(Path(path))
+        self.session=session;self.session_path=Path(path);self.dirty=False
+        self.refresh();self.record_activity('Session opened');self.banner.setText('Session opened')
+
     def open_session(self):
         if self.dirty:
             if QMessageBox.question(self,'Session','Discard unsaved changes and open another session?')!=QMessageBox.StandardButton.Yes:return
         path,_=QFileDialog.getOpenFileName(self,'Open session','','Solide session (*.solide.json *.json)')
         if not path:return
-        try:self.session=load_session(Path(path));self.session_path=Path(path);self.dirty=False;self.refresh();self.record_activity('Session opened')
+        try:self.load_session_path(path)
         except Exception as exc:self.notify_error(str(exc))
 
     def choose_directory(self):
@@ -690,6 +746,7 @@ class MainWindow(QMainWindow):
 
     def save_settings(self):
         self.config.update(output_dir=self.output_dir.text().strip(),background=self.background.isChecked(),
+                     text_size=self.text_size.currentData(),
                      sources=[s for s,c in self.source_checks.items() if c.isChecked()])
         try:atomic_write(self.config_path,json.dumps(self.config,ensure_ascii=False,indent=2));self.banner.setText('Settings saved')
         except Exception as exc:self.notify_error(str(exc))

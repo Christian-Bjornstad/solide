@@ -3,6 +3,7 @@ import os
 os.environ['QT_QPA_PLATFORM']='offscreen'
 from pathlib import Path
 import sys
+from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from PyQt6.QtWidgets import QApplication
 from solide.models import Variant,Session
@@ -10,7 +11,11 @@ from solide.gui import MainWindow
 from PIL import Image,ImageDraw
 
 app=QApplication([])
-window=MainWindow()
+with patch('solide.gui.Path.home',return_value=Path('artifacts/preview-home').resolve()), \
+     patch('solide.gui.ActivityLog',return_value=None), \
+     patch('solide.gui.read_password',return_value=''):
+    window=MainWindow()
+window.output_dir.setText('C:/Solide/workspace')
 window.session=Session(variants=[
     Variant(patient='DEMO-001',gene='EGFR',transcript='NM_005228.5',coding='c.2573T>G',protein='p.L858R',
             af_percent=21.1,coverage=7050,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True,

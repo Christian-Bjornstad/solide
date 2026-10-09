@@ -17,6 +17,12 @@ python start_python_felles.py
 
 After installation, `SOLIDE_START.cmd` also starts the app.
 
+To open a saved local review directly:
+
+```powershell
+python start_python_felles.py --session "C:\path\review.solide.json"
+```
+
 For the laboratory's **Python FELLES** environment:
 
 1. Save the project in a permanent folder.
@@ -48,6 +54,9 @@ need to finish first. Provisional captures remain marked as partial evidence.
 
 ### Accounts, activity and reruns
 
+**Settings → Text size** offers 14, 16, 18 and 20 px; 16 px is the default.
+Dialogs, dropdowns and progress text keep readable colours with Windows dark themes.
+
 **Settings → Database accounts** supports Franklin, COSMIC, OncoKB and MTBP.
 Enter a username and optional password, then **Save account**. Usernames stay
 in local settings; passwords use Windows Credential Manager under a separate
@@ -66,8 +75,8 @@ completed jobs.
 
 - **Run pending**: new, incomplete and outdated source searches.
 - **Retry failed**: failed searches, including missing captures and ambiguous results.
-- **Rerun selected**: highlighted result rows, including completed results.
-- **Rerun all**: every selected variant and checked source.
+- **Rerun… → Selected results**: highlighted result rows, including completed results.
+- **Rerun… → All selected variants**: every selected variant and checked source.
 
 Rerunning any MTBP result targets the complete selected patient batch. An uncertain
 submission retains its exact report ID and is reconciled before submitting it again.
@@ -140,10 +149,11 @@ Adapters receive variant data and pseudonymous search IDs. Authenticated profile
 stay under `%USERPROFILE%\.solide\browser_profiles`. Source files, sessions,
 reports, credentials and browser profiles are excluded from Git.
 
-Live authenticated provider flows, MTBP **Other**, institutional access and the
-work-PC environment still require a laboratory pilot. No patient variants were
-sent to external services during development. Reports require professional review
-before clinical use.
+Small live ClinVar, Franklin, COSMIC and OncoKB searches were tested locally with
+supplied variant data, including captures and a successful retry after an Edge
+startup failure. MTBP returned **Sign-in required** and needs a fresh sign-in
+before **Other** and full-report capture can be tested. Institutional access
+and the work-PC environment still require a laboratory pilot.
 
 ## Excel reports
 
@@ -188,4 +198,6 @@ python scripts/render_preview.py
 
 Tests use synthetic fixtures. The optional local reference-file test is skipped
 when the laboratory's untracked input files are absent. The UI preview is synthetic.
+Additional private checks used the supplied raw files, archive workbooks and actual
+Excel exports; their data, sessions, reports and screenshots stay outside Git.
 See [verification](docs/VERIFICATION.md) for tested scope and remaining checks.

@@ -31,6 +31,11 @@ timeout handling. Policy checks are read-only; neither ordinary Edge windows nor
 other evidence sessions are closed to make a profile available. No runtime
 dependencies were added.
 
+The profile-idle probe uses a three-second timeout after real Windows testing
+showed that refusal from a closed local port takes just over two seconds.
+Only explicit refusal permits reuse; active, malformed or uncertain endpoints
+remain blocked. No existing browser is closed to recover a stale announcement.
+
 Provider fixes include OncoKB page identity checks and GRCh37 genomic fallback,
 explicit terminal-page detection, diagnostic captures on rendering timeouts,
 independent COSMIC cache results, COSMIC GRCh37 selection and terminal-page

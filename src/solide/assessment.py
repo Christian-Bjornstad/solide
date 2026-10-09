@@ -1,6 +1,7 @@
 """Manual assessments live in the session; Excel is an exported snapshot."""
 from datetime import datetime,timezone
 from PyQt6.QtWidgets import QDialog,QFormLayout,QComboBox,QLineEdit,QPlainTextEdit,QDialogButtonBox,QLabel
+from .appearance import light_palette
 
 FIELDS=('classification','report_decision','reviewer','comment','reviewed_at')
 CLASSIFICATIONS=('','Oncogenic','Likely oncogenic','VUS','Likely benign','Benign')
@@ -22,6 +23,7 @@ def save_assessment(session,variant,*,classification,decision,reviewer,comment):
 class AssessmentDialog(QDialog):
     def __init__(self,variant,parent=None):
         super().__init__(parent)
+        self.setPalette(light_palette())
         self.setWindowTitle('Variant assessment');self.resize(640,440)
         form=QFormLayout(self);form.setContentsMargins(24,24,24,24);form.setSpacing(14)
         form.addRow(QLabel(f'{variant.gene}  {variant.corrected_hgvs or variant.coding or variant.protein}'))
@@ -29,6 +31,7 @@ class AssessmentDialog(QDialog):
         self.classification.addItems(CLASSIFICATIONS);self.classification.setCurrentText(variant.classification)
         self.decision=QComboBox();self.decision.addItems(['Pending','Include','Exclude'])
         self.decision.setCurrentText(variant.report_decision)
+        for combo in (self.classification,self.decision):combo.view().setPalette(light_palette())
         self.reviewer=QLineEdit(variant.reviewer)
         self.comment=QPlainTextEdit(variant.comment);self.comment.setMinimumHeight(150)
         form.addRow('Classification',self.classification);form.addRow('Report decision',self.decision)
