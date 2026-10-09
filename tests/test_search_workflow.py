@@ -115,3 +115,76 @@ def test_forced_rerun_does_not_overwrite_other_completed_sources(monkeypatch,tmp
     module.run_queue(session,['ClinVar','Franklin'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan=plan)
     assert calls==[['ClinVar']] and v.evidence['Franklin']['summary']=='Keep me'
     assert v.evidence['ClinVar']['summary']=='Fresh search'
+
+
+def test_brca_plan_and_queue_never_query_other_genes(monkeypatch,tmp_path):
+    import solide.evidence as module
+    calls=[]
+    def lookup(v):
+        calls.append(v.gene)
+        identity={'gene':v.gene,'assembly':'GRCh37','hgvs':f'{v.transcript}:{v.coding}'}
+        return {'status':'found','clinical_significance':'Source assertion','raw':{'query_basis':'full_hgvs',
+            'identity_verification':{'accepted':True,'requested':identity,'returned':identity,'method':'full_hgvs'}}}
+    monkeypatch.setattr(module,'brca_exchange_variant',lookup)
+    variants=[Variant(patient='DEMO',gene=gene,transcript='NM_1.1',coding='c.1A>T',assembly='GRCh37',selected=True)
+        for gene in ('BRCA1','BRCA2','EGFR','BRCA1,BRCA2')]
+    s=Session(variants=variants);sources=['BRCA Exchange']
+    plan=build_search_plan(s,sources,'all')
+    assert plan=={(v.id,'BRCA Exchange') for v in variants[:2]}
+    module.run_queue(s,sources,tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan=plan)
+    assert calls==['BRCA1','BRCA2']
+    assert all(not v.evidence for v in variants[2:])
+    evidence=variants[0].evidence['BRCA Exchange'];assessment=assess_evidence(variants[0],evidence,s)
+    assert assessment.label=='Verified match' and 'versioned HGVS' in assessment.reason
+    assert not variants[0].classification and variants[0].report_decision=='Pending'
+
+
+@pytest.mark.parametrize('status',['submission_unknown','timeout','partial_capture'])
+def test_uncertain_mtbp_submission_is_passed_to_retry_reconciliation(monkeypatch,tmp_path,status):
+    import solide.evidence as module
+    from solide._vendor.archer.core.models import DatabaseEvidence
+    from solide._vendor.archer.services.browser_review import BrowserReviewService
+    calls=[]
+    class Service:
+        def __init__(self,**kwargs):pass
+        variant_key=staticmethod(BrowserReviewService.variant_key)
+        def search_variants(self,records,sources,root,progress,checkpoint,prior_evidence):
+            calls.append(prior_evidence)
+            checkpoint({self.variant_key(r):[DatabaseEvidence('MTBP','not_found','Reconciled')] for r in records})
+    monkeypatch.setattr(module,'BrowserReviewService',Service)
+    v=Variant(patient='DEMO',gene='EGFR',protein='p.L858R',assembly='GRCh37',selected=True)
+    s=Session(variants=[v]);v.evidence['MTBP']={'database':'MTBP','status':status,
+        'summary':'Wait for report','fingerprint':v.fingerprint('Other'),'mtbp_batch':module.batch_fingerprint(s,'DEMO'),
+        'raw':{'analysis_id':'SOLIDE_DEMO'}}
+    plan=build_search_plan(s,['MTBP'],'failed')
+    module.run_queue(s,['MTBP'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan=plan)
+    assert len(calls)==1 and next(iter(calls[0].values()))[0].raw['analysis_id']=='SOLIDE_DEMO'
+    assert v.evidence['MTBP']['summary'].startswith('Reconciled')
+
+
+@pytest.mark.parametrize('status',['layout_changed','ambiguous','transient','submission_unknown','deferred'])
+def test_provider_retry_states_are_visible_and_retryable(status):
+    v=sample();v.evidence['ClinVar']=result(v,status)
+    s=Session(variants=[v]);assert assess_evidence(v,v.evidence['ClinVar'],s).retryable
+    assert build_search_plan(s,['ClinVar'],'failed')=={(v.id,'ClinVar')}
+
+
+def test_mtbp_provider_exception_retains_interim_report_id(monkeypatch,tmp_path):
+    import solide.evidence as module
+    from solide._vendor.archer.core.models import DatabaseEvidence
+    from solide._vendor.archer.services.browser_review import BrowserReviewService
+    emitted=[]
+    class Service:
+        def __init__(self,**kwargs):pass
+        variant_key=staticmethod(BrowserReviewService.variant_key)
+        def search_variants(self,records,sources,root,progress,checkpoint):
+            checkpoint({self.variant_key(records[0]):[DatabaseEvidence('MTBP','submission_unknown',raw={
+                'analysis_id':'SOLIDE-DEMO','provisional_status':'submission_unknown'})]})
+            raise TimeoutError('Provider interrupted')
+    monkeypatch.setattr(module,'BrowserReviewService',Service)
+    v=Variant(patient='DEMO',gene='EGFR',protein='p.L858R',selected=True,assembly='GRCh37')
+    module.run_queue(Session(variants=[v]),['MTBP'],tmp_path,module.QueueControl(),lambda *args:emitted.append(args),lambda message:None)
+    assert len(emitted)==2
+    assert emitted[0][2]['raw']['provisional_status']=='submission_unknown'
+    final=v.evidence['MTBP'];assert final['status']=='submission_unknown'
+    assert final['raw']['analysis_id']=='SOLIDE-DEMO' and 'provisional_status' not in final['raw']

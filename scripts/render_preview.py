@@ -14,7 +14,8 @@ window=MainWindow()
 window.session=Session(variants=[
     Variant(patient='DEMO-001',gene='EGFR',transcript='NM_005228.5',coding='c.2573T>G',protein='p.L858R',
             af_percent=21.1,coverage=7050,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True,
-            comment='Synthetic demonstration',platform='Genexus',source_row=2),
+            comment='Synthetic demonstration',classification='Demonstration only',report_decision='Include',
+            reviewer='Demo reviewer',platform='Genexus',source_row=2),
     Variant(patient='DEMO-001',gene='TP53',transcript='NM_000546.6',coding='c.743G>A',protein='p.R248Q',
             af_percent=25.8,coverage=6355,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),
     Variant(patient='DEMO-001',gene='MET',transcript='NM_001174067.1',coding='c.3029C>T',protein='p.T1010I',

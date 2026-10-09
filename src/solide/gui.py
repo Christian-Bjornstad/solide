@@ -12,7 +12,7 @@ from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QListWidget, QStackedWidget, QFileDialog, QMessageBox, QLineEdit,
     QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
-    QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame)
+    QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout)
 from .models import Session, Variant
 from .importing import load_file
 from .quality import qc_flags, review_reasons
@@ -20,7 +20,8 @@ from .session import save_session, load_session, atomic_write
 from .table_model import VariantTableModel, VariantProxy
 from .reporting import export_patient, STATUS
 from .evidence import SOURCES, QueueControl, run_queue, evidence_is_current
-from .evidence import build_search_plan, assess_evidence
+from .evidence import build_search_plan, assess_evidence, source_applies
+from .assessment import AssessmentDialog,save_assessment
 from .accounts import ACCOUNT_PROVIDERS, browser_credentials, read_password, write_password, remove_password
 from .activity import ActivityLog
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
@@ -235,13 +236,15 @@ class MainWindow(QMainWindow):
         self.search.textChanged.connect(self.apply_filter);self.patient_filter.currentTextChanged.connect(self.apply_filter)
         self.variant_table=table(self.proxy)
         self.variant_table.selectionModel().currentRowChanged.connect(self.show_variant)
-        split=QSplitter(Qt.Orientation.Vertical);split.addWidget(self.variant_table)
+        split=QSplitter(Qt.Orientation.Vertical);split.addWidget(self.variant_table);self.variant_table.setMinimumHeight(180)
         detail=QWidget();d=QHBoxLayout(detail);d.setContentsMargins(0,0,0,0)
         self.detail=QTextEdit();self.detail.setReadOnly(True);self.detail.setPlaceholderText('Select a variant')
         self.raw_detail=QTextEdit();self.raw_detail.setReadOnly(True)
         tabs=QTabWidget();tabs.addTab(self.detail,'Details')
-        source_button=self.button('Source data',self.show_raw_source)
-        tabs.setCornerWidget(source_button,Qt.Corner.TopRightCorner)
+        tools=QWidget();tool_row=QHBoxLayout(tools);tool_row.setContentsMargins(0,0,0,0)
+        self.assessment_btn=self.button('Assess variant',self.assess_variant)
+        tool_row.addWidget(self.assessment_btn);tool_row.addWidget(self.button('Source data',self.show_raw_source))
+        tabs.setCornerWidget(tools,Qt.Corner.TopRightCorner)
         self.detail.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
         d.addWidget(tabs,1)
         form_box=QWidget();form=QFormLayout(form_box);form.setContentsMargins(18,12,18,12)
@@ -259,7 +262,10 @@ class MainWindow(QMainWindow):
         form.addRow(self.verified_check)
         form.addRow(self.button('Save review',self.save_identity))
         self.verified_check.setToolTip('Review Mutalyzer suggestions and MANE mapping before approval. Original exported fields remain in Source data.')
-        tabs.addTab(form_box,'Identity review');split.addWidget(detail);split.setSizes([460,290]);split.setHandleWidth(3);layout.addWidget(split,1)
+        form_scroll=QScrollArea();form_scroll.setWidgetResizable(True);form_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        form_scroll.setWidget(form_box);tabs.addTab(form_scroll,'Identity review')
+        split.addWidget(detail);detail.setMinimumHeight(160);split.setChildrenCollapsible(False)
+        split.setStretchFactor(0,3);split.setStretchFactor(1,2);split.setSizes([460,240]);split.setHandleWidth(3);layout.addWidget(split,1)
         self.selection_summary=QLabel();layout.addWidget(self.selection_summary)
 
     def build_evidence(self):
@@ -269,10 +275,11 @@ class MainWindow(QMainWindow):
         top.addWidget(QLabel('Patient'));top.addWidget(self.tissue_patient)
         top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
         top.addWidget(self.button('Save tissue',self.save_tissue));layout.addLayout(top)
-        self.source_checks={};sources=QHBoxLayout()
-        for source in SOURCES:
+        self.source_checks={};sources=QGridLayout()
+        for index,source in enumerate(SOURCES):
             check=QCheckBox(source);check.setChecked(source in self.config.get('sources',['ClinVar','MTBP','Franklin','Mutalyzer','SpliceAI']))
-            sources.addWidget(check);self.source_checks[source]=check
+            if source=='BRCA Exchange':check.setToolTip('Runs only for BRCA1 and BRCA2. Exact hg19 alleles or versioned HGVS are checked.')
+            sources.addWidget(check,index//4,index%4);self.source_checks[source]=check
         layout.addLayout(sources)
         row=QHBoxLayout();self.run_btn=self.button('Run searches',self.start_queue,True);row.addWidget(self.run_btn)
         self.run_btn.setText('Run pending')
@@ -302,7 +309,8 @@ class MainWindow(QMainWindow):
         layout=self.page();box=QGroupBox('Export reports');form=QVBoxLayout(box)
         row=QHBoxLayout();self.report_patient=QComboBox();row.addWidget(self.report_patient,1)
         self.report_btn=self.button('Export Excel',self.export,True);row.addWidget(self.report_btn)
-        self.report_btn.setToolTip('One workbook per patient: selected variants, all-row QC, source evidence, screenshots and raw data. Comments are saved in the session.')
+        row.addWidget(self.button('Open folder',self.open_report_folder))
+        self.report_btn.setToolTip('Versioned Excel snapshot: app assessments, selected variants, all-row QC, source evidence and original data.')
         form.addLayout(row);layout.addWidget(box)
         self.report_log=QPlainTextEdit();self.report_log.setReadOnly(True);layout.addWidget(self.report_log,1)
         self.report_log.setPlaceholderText('Exported files')
@@ -352,7 +360,7 @@ class MainWindow(QMainWindow):
 
     def busy(self,value):
         for widget in (self.import_btn,self.open_btn,self.run_btn,self.login_btn,self.report_btn,
-                       self.variant_table,self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit,
+                       self.assessment_btn,self.variant_table,self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit,
                        self.verified_check,self.output_dir,self.background,self.tissue,
                        self.retry_btn,self.rerun_btn,self.rerun_all_btn,self.account_save_btn,self.account_clear_btn,
                        self.account_username,self.account_password,self.login_source):
@@ -426,8 +434,8 @@ class MainWindow(QMainWindow):
             for flag in qc_flags(v):
                 items=[QStandardItem(str(x)) for x in [v.patient,v.gene,flag.category,flag.status,flag.message,v.kind,v.source_row]]
                 self.qc_model.appendRow(items);count+=1
-                if flag.category=='Coverage' and flag.status=='Failed':failed.add((v.patient,v.gene))
-        self.qc_summary.setText(f'{count} quality flags · {len(failed)} patient / gene groups with coverage <500')
+                if flag.category=='Coverage' and flag.status=='Failed':failed.add(v.id)
+        self.qc_summary.setText(f'{count} quality flags · {len(failed)} exported rows with coverage <500')
         for combo,first in [(self.patient_filter,'All patients'),(self.tissue_patient,None),(self.report_patient,'All patients')]:
             prior=combo.currentText();combo.blockSignals(True);combo.clear()
             if first:combo.addItem(first)
@@ -478,13 +486,23 @@ class MainWindow(QMainWindow):
                f'Source: {Path(v.source_file).name} · row {v.source_row}',
                '\nReview needed: '+(', '.join(review_reasons(v)) or 'No additional identity checks'),
                *[f'{f.category}: {f.status} – {f.message}' for f in qc_flags(v)],
-               '\nComment: '+v.comment]
+               f'\nClassification: {v.classification or "Pending"} · Report: {v.report_decision}',
+               f'Reviewer: {v.reviewer or "—"}', '\nAssessment: '+v.comment]
         for source,e in v.evidence.items():
             state=STATUS.get(e.get('status'),e.get('status','Unknown')) if evidence_is_current(v,e,self.session.tissue(v.patient),self.session) else 'Outdated'
             lines.append(f'\n{source}: {state}\n{e.get("summary", "")}')
         self.detail.setPlainText('\n'.join(lines))
         self.raw_detail.setPlainText(json.dumps({'source':v.source_file,'row':v.source_row,'assembly':v.assembly,
             'review_needed':review_reasons(v),'raw_data':v.raw,'evidence':v.evidence},ensure_ascii=False,indent=2,default=str))
+
+    def assess_variant(self):
+        if self.active or not self.current_variant:return
+        dialog=AssessmentDialog(self.current_variant,self)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        save_assessment(self.session,self.current_variant,**dialog.values())
+        self.variant_model.layoutChanged.emit()
+        self.mark_dirty();self.auto_save();self.show_variant(self.variant_table.currentIndex())
+        self.banner.setText('Assessment saved.')
 
     def save_identity(self):
         if self.active:return
@@ -527,6 +545,7 @@ class MainWindow(QMainWindow):
             if v.selected:sources.update(s for s,c in self.source_checks.items() if c.isChecked())
             for source in SOURCES:
                 if source not in sources:continue
+                if not source_applies(v,source):continue
                 e=v.evidence.get(source,{})
                 assessment=assess_evidence(v,e,self.session)
                 state=assessment.label
@@ -805,6 +824,12 @@ class MainWindow(QMainWindow):
     def export_finished(self,paths):
         self.report_log.setPlainText('Reports exported:\n'+'\n'.join(map(str,paths)))
         self.record_activity(f'Exported {len(paths)} patient reports')
+
+    def open_report_folder(self):
+        root=self.work_root()
+        if root is not None:
+            folder=root/'reports';folder.mkdir(exist_ok=True)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder.resolve())))
 
     def closeEvent(self,event):
         if self.active and self.active.isRunning():

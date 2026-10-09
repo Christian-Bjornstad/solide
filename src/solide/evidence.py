@@ -12,16 +12,22 @@ from PIL.Image import DecompressionBombError
 from .models import Variant, Session
 from .quality import review_reasons, MANE_TARGETS
 from .nomenclature import hgvs_query, genomic_query, normalize_variant, spliceai_variant, spliceai_summary
-from ._vendor.archer.core.models import VariantRecord
+from .brca_exchange import brca_exchange_variant
+from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
 from ._vendor.archer.services.evidence_audit import audit_digest
 from ._vendor.archer.services.capture_validation import validate_capture
 
-SOURCES = ('ClinVar', 'Franklin', 'COSMIC', 'OncoKB', 'MTBP', 'Mutalyzer', 'SpliceAI')
+SOURCES = ('ClinVar', 'Franklin', 'COSMIC', 'OncoKB', 'MTBP', 'Mutalyzer', 'SpliceAI', 'BRCA Exchange')
 COMPLETE = {'found', 'not_found', 'not_applicable', 'verified'}
 FAILED = {'error','timeout','identity_mismatch','partial_capture','login_required',
           'authentication_failed','verification_required','network_error','capture_failed','ambiguous_result',
-          'unauthorized','rate_limited','quota_exhausted','token_required','invalid_query','unsupported_query'}
+          'unauthorized','rate_limited','quota_exhausted','token_required','invalid_query','unsupported_query',
+          'layout_changed','ambiguous','transient','submission_unknown','deferred'}
+
+
+def source_applies(variant, source):
+    return source != 'BRCA Exchange' or variant.gene in {'BRCA1','BRCA2'}
 
 
 @dataclass(frozen=True)
@@ -65,7 +71,8 @@ def assess_evidence(v, evidence, session):
         return EvidenceAssessment({'partial_capture':'Partial capture','login_required':'Sign-in required',
             'timeout':'Timeout','ambiguous_result':'Ambiguous match','unauthorized':'Access required',
             'token_required':'Access required','rate_limited':'Rate limited','quota_exhausted':'Quota reached',
-            'invalid_query':'Review query','unsupported_query':'Review query'}.get(status,'Failed'),evidence.get('summary','Search did not complete.'),True)
+            'invalid_query':'Review query','unsupported_query':'Review query','layout_changed':'Layout changed',
+            'ambiguous':'Ambiguous match','submission_unknown':'Submission uncertain','deferred':'Deferred'}.get(status,'Failed'),evidence.get('summary','Search did not complete.'),True)
     if status=='not_found':return EvidenceAssessment('No match','Search completed without a matching record.')
     if status=='not_applicable':return EvidenceAssessment('Not applicable',evidence.get('summary',''))
     if status=='found':
@@ -84,7 +91,8 @@ def assess_evidence(v, evidence, session):
             try:splice_verified=raw.get('query')==genomic_query(v)==raw.get('response',{}).get('variant')
             except ValueError:pass
         if genomic_verified or exact_identity or splice_verified:
-            return EvidenceAssessment('Verified match','Returned genomic identity matches the request. Review clinical interpretation separately.')
+            basis='versioned HGVS' if identity.get('method')=='full_hgvs' else 'genomic identity'
+            return EvidenceAssessment('Verified match',f'Returned {basis} matches the request. Review clinical interpretation separately.')
         return EvidenceAssessment('Review match','Result found; confirm variant identity in the source.')
     return EvidenceAssessment('Review required',evidence.get('summary','Review the source response.'))
 
@@ -97,6 +105,7 @@ def build_search_plan(session, sources, mode='pending', chosen=None):
     for v in selected:
         for source in sources:
             if source not in SOURCES:raise ValueError('Unknown database source.')
+            if not source_applies(v,source):continue
             evidence=v.evidence.get(source,{})
             assessment=assess_evidence(v,evidence,session)
             pending=not evidence_is_current(v,evidence,session.tissue(v.patient),session) or evidence.get('status') not in COMPLETE
@@ -201,7 +210,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
     for patient in sorted({v.patient for v in selected}):
         variants = [v for v in selected if v.patient == patient]
         # Nomenclature comes first. Normalization candidates require human acceptance.
-        for source in ('Mutalyzer', 'SpliceAI'):
+        for source in ('Mutalyzer', 'SpliceAI', 'BRCA Exchange'):
             if source not in sources:
                 continue
             for v in variants:
@@ -223,6 +232,9 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             summary += '\nMANE suggestion: ' + str(data['mapping'].get('mapped_description',data['mapping']))
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'})
+                    elif source == 'BRCA Exchange':
+                        query_record(v,source)
+                        store(v,source,brca_exchange_variant(v))
                     else:
                         control.wait(max(0, 30 - (time.monotonic() - last_splice)))
                         data=spliceai_variant(v)
@@ -262,6 +274,17 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                     records.append(pairs[0][1]);active[key]=todo
             if not records:
                 continue
+            prior={}
+            if source=='MTBP':
+                fields=('database','status','summary','accession','clinical_significance','url','raw')
+                for key,pairs in mapping.items():
+                    for v,_ in pairs:
+                        previous=v.evidence.get(source,{})
+                        if previous.get('raw',{}).get('analysis_id') and evidence_is_current(v,previous,session.tissue(patient),session):
+                            data={field:previous[field] for field in fields if field in previous}
+                            if data.get('raw',{}).get('provisional_status')=='submission_unknown':data['status']='submission_unknown'
+                            prior[key]=[DatabaseEvidence(**data)]
+                            break
             returned=set()
             original_audit=getattr(service,'_write_audit',None)
             digests={audit_digest(source,record):service.variant_key(record) for record in records}
@@ -281,27 +304,35 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                 for key, entries in results.items():
                     for result in entries:
                         for v in active.get(key,[]):
-                            returned.add(v.id)
                             data=asdict(result)
+                            if 'provisional_status' not in data.get('raw',{}):returned.add(v.id)
                             record=mapping[key][0][1]
                             if not record.hgvsc and not record.ref_allele:
                                 data.setdefault('raw',{})['query_basis']='gene_protein_or_identifier'
                                 data['summary']+='\nGene / protein or variant ID search; genomic identity unconfirmed.'
                             store(v,result.database,data)
+            def finish_unreturned(v,message):
+                previous=v.evidence.get(source,{})
+                if previous.get('raw',{}).get('provisional_status')=='submission_unknown':
+                    data={field:previous[field] for field in ('status','summary','url','raw') if field in previous}
+                    data['raw']=dict(data.get('raw',{}));data['raw'].pop('provisional_status',None)
+                    data['status']='submission_unknown';data['summary']=message+'\nRetained report ID must be reconciled before resubmission.'
+                else:data={'status':'error','summary':message}
+                store(v,source,data)
             try:
                 service.search_variants(records,[source],patient_directory,
-                                        progress=progress,checkpoint=checkpoint)
+                                        progress=progress,checkpoint=checkpoint,**({'prior_evidence':prior} if prior else {}))
                 for vv in active.values():
                     for v in vv:
                         if v.id not in returned:
-                            store(v,source,{'status':'error','summary':'Source returned no variant status. Retry.'})
+                            finish_unreturned(v,'Source returned no final variant status. Retry.')
             except BrowserReviewCancelled:
                 raise
             except Exception as exc:
                 for vv in active.values():
                     for v in vv:
                         if v.id not in returned:
-                            store(v,source,{'status':'error','summary':str(exc)})
+                            finish_unreturned(v,str(exc))
             finally:
                 if original_audit is not None:
                     service._write_audit=original_audit

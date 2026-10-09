@@ -34,13 +34,15 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 
 1. **Workspace** imports TSV or Genexus XLSX; confirm patient / sample ID and assembly.
 2. Switch the workspace view to **Quality** to check every imported row, including unselected rows.
-3. **Variants** lets you filter, select, comment and review variant identity.
+3. **Variants** lets you filter, select and review variant identity. **Assess variant**
+   saves classification, report decision, reviewer and assessment notes in the app.
 4. **Searches** selects databases and MTBP tissue (default **Other**). Save the
    session, sign in through Settings where needed, then run searches.
 5. Review source status and screenshots before exporting **Reports**.
 
-Sessions preserve source data, comments, reviewed HGVS and search history locally.
-Comments edited directly in an exported Excel file are not imported back.
+Sessions preserve source data, app assessments, reviewed HGVS and search history locally.
+Assessment is performed in the app. Excel is a versioned snapshot; edits to an
+exported workbook are not read back.
 Pause and stop take effect at checkpoints; active browser or HTTP requests may
 need to finish first. Provisional captures remain marked as partial evidence.
 
@@ -67,11 +69,13 @@ completed jobs.
 - **Rerun selected**: highlighted result rows, including completed results.
 - **Rerun all**: every selected variant and checked source.
 
-Rerunning any MTBP result regenerates the complete selected patient batch.
+Rerunning any MTBP result targets the complete selected patient batch. An uncertain
+submission retains its exact report ID and is reconciled before submitting it again.
 Previous evidence is archived in local session history before replacement.
 The result list includes **Pending**, **Verified match**, **Review match**,
 **No match**, **Outdated** and explicit failure states. **Verified match** requires
-returned genomic identity evidence; a found record alone does not qualify.
+returned genomic identity evidence, or exact versioned HGVS for BRCA Exchange;
+a found record alone does not qualify.
 Source screenshots are checked for readable content. **View evidence** opens
 the source response and captured images. Excel reports include the same match
 assessment. Clinical significance still requires professional review.
@@ -108,7 +112,14 @@ reviewed hg19 `chr-pos-REF-ALT` when a genomic lookup is needed after correction
 ClinVar, Franklin, COSMIC, OncoKB and MTBP use the pinned
 [Archer Edge/CDP runtime](docs/ARCHER_REUSE.md). Sign-in uses visible Edge;
 automated windows are minimised by default. Edge remote debugging must be allowed.
-Mutalyzer and SpliceAI use HTTP adapters. SpliceAI requires confirmed GRCh37 and
+Mutalyzer, SpliceAI and BRCA Exchange use HTTP adapters. BRCA Exchange runs only
+for **BRCA1 / BRCA2**. It checks exact GRCh37 alleles or complete versioned HGVS,
+and saves the source classification, accession, dataset release and identity
+assessment separately from the app classification. The public API may change:
+unexpected or incomplete responses remain explicit review/error states.
+[BRCA Exchange API documentation](https://brcaexchange.org/about/api).
+
+SpliceAI requires confirmed GRCh37 and
 explicit REF/ALT, uses `distance=500`, `mask=1`, and runs at least 30 seconds apart.
 Genexus XLSX may omit REF/ALT; these must be reviewed before genomic searches.
 
@@ -118,7 +129,9 @@ the variant comment.
 
 Changing variant identity or tissue marks older evidence as outdated. Changing
 the selected patient batch also invalidates the MTBP full report. A resumed MTBP
-search reruns the whole selected batch when needed. Existing portal reports are
+search reruns the whole selected batch when needed. When identity, tissue or
+selection changes, old evidence is retained in local history and a new batch is
+created; stale report content is never reused. Existing portal reports are
 not automatically deleted; the newly generated report may be removed after local
 capture. Errors and partial captures remain distinct from **Not found**.
 
@@ -131,6 +144,39 @@ Live authenticated provider flows, MTBP **Other**, institutional access and the
 work-PC environment still require a laboratory pilot. No patient variants were
 sent to external services during development. Reports require professional review
 before clinical use.
+
+## Excel reports
+
+Each export creates a new timestamped workbook per patient without replacing
+previous files. The original exports remain untouched.
+
+- **Overview**: selected variants, original and reviewed descriptions, imported
+  annotation, app classification/decision/reviewer/notes, and evidence links.
+- **Quality**: all QC flags, including unselected rows, with row provenance.
+- **Searches**: result and match status, source assertion, accession, capture time,
+  links and source responses.
+- **Raw data**: original source values and column order, including unnamed
+  columns, followed by source hash, sheet and physical row references.
+- Variant sheets and a shared full MTBP attachment appear when evidence exists.
+  Tall captures are segmented at readable width; outdated screenshots are omitted.
+
+`Include`, `Exclude` and `Pending` are saved app decisions. The workbook retains
+every selected variant with its decision for review; it does not automatically
+issue a final clinical report or classify variants from database assertions.
+Default manual categories follow the reference template, and custom laboratory
+classification text can be entered.
+
+Import supports original Ion Reporter TSV and Genexus TSV/XLSX exports with one
+unambiguous variant table. Reviewed child templates, target/gene coverage tables
+and sample-level QC sheets are separate source structures and are not imported
+as variants. ZIP archives were inspected as design references; extract an original
+TSV/XLSX export locally before importing. Duplicate columns or competing variant
+tables are rejected rather than silently overwriting or duplicating records.
+Workbooks exported by Solide are report snapshots and are not import sources.
+
+Text is written safely as text, including original values starting with formula
+characters. Excel's cell limit still applies; the session retains full source
+values and responses. Source files and image captures remain available locally.
 
 ## Development
 

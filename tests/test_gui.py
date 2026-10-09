@@ -141,3 +141,32 @@ def test_edge_sign_in_still_works_when_vault_unavailable(monkeypatch,tmp_path):
     assert window.config['login_checks']['Franklin']['state']=='Last sign-in confirmed'
     assert window.live_status.text()=='Idle'
     window.close()
+
+
+def test_compact_workspace_keeps_variant_rows_visible_and_brca_gene_scoped():
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    window.session=Session(variants=[Variant(patient='DEMO',gene='EGFR',selected=True),Variant(patient='DEMO',gene='BRCA1',selected=True)])
+    window.refresh();window.resize(1050,700);window.show();app.processEvents()
+    assert window.variant_table.viewport().height()>=100
+    for source,check in window.source_checks.items():check.setChecked(source=='BRCA Exchange')
+    assert window.evidence_model.rowCount()==1 and 'BRCA1' in window.evidence_model.item(0,1).text()
+    window.close()
+
+
+def test_assessment_dialog_saves_into_app_session(monkeypatch,tmp_path):
+    import solide.gui as gui
+    from PyQt6.QtWidgets import QDialog
+    class Dialog:
+        def __init__(self,v,parent):assert v.gene=='EGFR'
+        def exec(self):return QDialog.DialogCode.Accepted
+        def values(self):return dict(classification='VUS',decision='Include',reviewer='DEMO reviewer',comment='Manual assessment')
+    monkeypatch.setattr(gui,'AssessmentDialog',Dialog)
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    window.session=Session(variants=[Variant(patient='DEMO',gene='EGFR')]);window.session_path=tmp_path/'demo.solide.json'
+    window.refresh();window.variant_table.selectRow(0);app.processEvents();window.assess_variant()
+    assert window.session.variants[0].classification=='VUS'
+    assert 'Manual assessment' in window.detail.toPlainText()
+    from solide.session import load_session
+    assert load_session(window.session_path).variants[0].report_decision=='Include'
+    assert window.session.history[-1]['event']=='assessment'
+    window.close()

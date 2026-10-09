@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "solide"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local desktop workspace for solid tumour variant review"
 requires-python = ">=3.11"
 dependencies = ["PyQt6>=6.7", "openpyxl>=3.1", "requests>=2.32", "Pillow>=10", "websocket-client>=1.8", "keyring>=25", "reportlab>=4", "pandas>=2.2"]
