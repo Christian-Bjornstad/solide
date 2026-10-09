@@ -29,10 +29,10 @@ def test_filename_cannot_escape_directory(tmp_path):
 
 def test_report_embeds_current_variant_image_and_full_mtbp_report(tmp_path):
     import zipfile
-    from PIL import Image
+    from PIL import Image,ImageDraw
     from solide.evidence import batch_fingerprint
     image=tmp_path/'synthetic.png'
-    Image.new('RGB',(640,400),(90,130,70)).save(image)
+    capture=Image.new('RGB',(640,400),'white');ImageDraw.Draw(capture).rectangle((0,0,320,400),fill=(90,130,70));capture.save(image)
     v=Variant(patient='DEMO',gene='EGFR',selected=True,assembly='GRCh37')
     session=Session(variants=[v])
     v.evidence['MTBP']={'database':'MTBP','status':'found','fingerprint':v.fingerprint('Other'),

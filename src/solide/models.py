@@ -29,6 +29,10 @@ class Variant:
     source_hash: str = ''
     selected: bool = False
     comment: str = ''
+    classification: str = ''
+    report_decision: str = 'Pending'
+    reviewer: str = ''
+    reviewed_at: str = ''
     corrected_hgvs: str = ''
     controlled_genomic: str = ''
     nomenclature_verified: bool = False

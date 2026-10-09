@@ -52,6 +52,9 @@ def load_file(path: Path) -> ImportResult:
         raise ValueError('Choose a TSV or XLSX file.')
     assembly = normalize_assembly(metadata.get('reference', ''))
     variants = []
+    eligible=[(sheet,rows) for sheet,rows in tables if any('Type' in row and ('Gene' in row or 'Genes' in row) for row in rows)]
+    if len(eligible)>1:
+        raise ValueError('Multiple variant tables found. Export the original variant sheet separately to avoid duplicate review copies.')
     for sheet_name, rows in tables:
         header_index = next((i for i, r in enumerate(rows)
                              if 'Type' in r and ('Gene' in r or 'Genes' in r)), None)
@@ -64,9 +67,14 @@ def load_file(path: Path) -> ImportResult:
                     if re.fullmatch(r'\d{2}[A-Za-z]{3}\d+(?:_\w+)?', text(cell)):
                         hint = text(cell)
         headers = [text(h) for h in rows[header_index]]
+        named=[h for h in headers if h]
+        if len(named)!=len({h.casefold() for h in named}):
+            raise ValueError('Duplicate column names found. Choose the original variant export instead of a reviewed worksheet.')
         platform = 'Ion Reporter' if 'Transcript' in headers and 'Genes' in headers else 'Genexus'
         for index, row in enumerate(rows[header_index + 1:], header_index + 2):
             raw = {h: cell for h, cell in zip(headers, row) if h}
+            if text(raw.get('Type'))=='Type' and text(raw.get('Gene',raw.get('Genes'))) in {'Gene','Genes'}:
+                continue
             if not text(raw.get('Type')) or not text(raw.get('Gene', raw.get('Genes'))):
                 continue
             def get(*names):
@@ -78,6 +86,8 @@ def load_file(path: Path) -> ImportResult:
                 warnings.append(f'Row {index}: allele frequency outside 0–100%.')
                 af = None
             raw['_sheet'] = sheet_name
+            raw['_columns'] = headers
+            raw['_values'] = list(row[:len(headers)]) + [None]*max(0,len(headers)-len(row))
             call = text(get('Call', 'Genotype'))
             variants.append(Variant(
                 id=hashlib.sha256(f'{digest}:{sheet_name}:{index}'.encode()).hexdigest()[:24],

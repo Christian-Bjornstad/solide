@@ -1,187 +1,200 @@
+"""Versioned Excel reports produced from the app's reviewed session."""
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime,timezone
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import tempfile
+import uuid
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.drawing.image import Image
-from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font,Alignment
 from .models import Session
-from .quality import qc_flags, review_reasons
-from .evidence import evidence_is_current, assess_evidence
+from .quality import qc_flags,review_reasons
+from .evidence import evidence_is_current,assess_evidence,valid_capture
+from .report_layout import safe_text,add_row,original_row,style_table,title,status_cell,internal_link,put_image,GREEN
 from . import __version__
 
-STATUS = {'found':'Found', 'verified':'Verified', 'not_found':'Not found',
-          'not_applicable':'Not applicable', 'needs_review':'Review required',
-          'error':'Error', 'timeout':'Timeout', 'identity_mismatch':'Identity mismatch',
-          'partial_capture':'Partial capture', 'manual_required':'Manual search',
-          'login_required':'Sign-in required','verification_required':'Review required',
-          'authentication_failed':'Sign-in failed','network_error':'Network error','ambiguous_result':'Ambiguous match'}
+STATUS={'found':'Found','verified':'Verified','not_found':'Not found','not_applicable':'Not applicable',
+    'needs_review':'Review required','error':'Error','timeout':'Timeout','identity_mismatch':'Identity mismatch',
+    'partial_capture':'Partial capture','manual_required':'Manual search','login_required':'Sign-in required',
+    'verification_required':'Review required','authentication_failed':'Sign-in failed','network_error':'Network error',
+    'ambiguous_result':'Ambiguous match'}
+SOURCE_ORDER=('MTBP','Franklin','ClinVar','OncoKB','COSMIC','BRCA Exchange','Mutalyzer','SpliceAI')
 
 
-def safe_text(value):
-    if isinstance(value, str):
-        value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', value)
-        if value.startswith(('=', '+', '-', '@')):
-            value = "'" + value
-        return value[:32767]
-    return value
+def source_classification(evidence):
+    raw=evidence.get('raw',{})
+    value=evidence.get('clinical_significance') or raw.get('expert_classification') or raw.get('classification') or ''
+    if isinstance(value,dict):return value.get('expert','')
+    return str(value)
 
 
-def add_row(sheet, values):
-    sheet.append([safe_text(v) for v in values])
+def captured_time(value):
+    try:return datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
+    except (ValueError,AttributeError):return None
 
 
-def style_table(sheet, header_row=1):
-    sheet.freeze_panes=f'A{header_row+1}'
-    sheet.auto_filter.ref=f'A{header_row}:{get_column_letter(sheet.max_column)}{sheet.max_row}'
-    for cell in sheet[header_row]:
-        cell.fill=PatternFill('solid',fgColor='425B3D')
-        cell.font=Font(name='Calibri',color='FFFFFF',bold=True,size=11)
-        cell.alignment=Alignment(wrap_text=True,vertical='center')
-    sheet.row_dimensions[header_row].height=30
-    for row in sheet.iter_rows(min_row=header_row+1):
-        for cell in row:
-            cell.font=Font(name='Calibri',size=11,color='1F2A22')
-            cell.alignment=Alignment(vertical='top',wrap_text=True)
-            if cell.row % 2 == 0:
-                cell.fill=PatternFill('solid',fgColor='F4F6F2')
-    for column in range(1,sheet.max_column+1):
-        width=max((len(str(sheet.cell(row,column).value or '')) for row in range(header_row,min(sheet.max_row,header_row+30)+1)), default=15)
-        sheet.column_dimensions[get_column_letter(column)].width=min(60,max(16,width+2))
-    sheet.sheet_view.showGridLines=False
-    sheet.print_options.horizontalCentered=True
-    sheet.sheet_properties.pageSetUpPr.fitToPage=True
-    sheet.page_setup.orientation='landscape'
-    sheet.page_setup.paperSize=sheet.PAPERSIZE_A4
-    sheet.page_setup.fitToWidth=1
-    sheet.page_setup.fitToHeight=0
-    sheet.print_title_rows=f'{header_row}:{header_row}'
+def ordered_evidence(variant):
+    order={name:index for index,name in enumerate(SOURCE_ORDER)}
+    return sorted(variant.evidence.items(),key=lambda pair:order.get(pair[0],99))
 
 
-def export_patient(session: Session, patient: str, directory: Path) -> Path:
+def original_value(v,*keys):
+    return next((v.raw[key] for key in keys if v.raw.get(key) not in (None,'')),'')
+
+
+def raw_values(v):
+    columns=v.raw.get('_columns',[]);values=v.raw.get('_values',[])
+    if not columns:return {key:value for key,value in v.raw.items() if not key.startswith('_')}
+    result={};reserved={str(name).casefold() for name in columns if name}
+    for index,name in enumerate(columns):
+        label=str(name) if name else f'Unnamed column {index+1}'
+        base=label;number=1
+        while label.casefold() in {key.casefold() for key in result} or (not name and label.casefold() in reserved):
+            number+=1;label=f'{base} ({number})'
+        result[label]=values[index] if index<len(values) else None
+    return result
+
+
+def detail_sheet(workbook,v,index):
+    name=re.sub(r'[\\/*?:\[\]]','_',f'V{index:02}_{v.gene or "Variant"}')[:31]
+    detail=workbook.create_sheet(name);title(detail,f'{v.gene}  {v.corrected_hgvs or v.coding or v.protein}',8)
+    for column in 'ABCDEFGH':detail.column_dimensions[column].width=18
+    add_row(detail,['Patient',v.patient,'Assembly',v.assembly])
+    add_row(detail,['Classification',v.classification,'Decision',v.report_decision,'Reviewer',v.reviewer])
+    add_row(detail,['Assessment',v.comment]);detail.merge_cells('B4:H4');detail.row_dimensions[4].height=max(60,min(240,18*(len(v.comment)//100+2)))
+    detail.cell(4,1).alignment=Alignment(vertical='top')
+    detail.cell(4,2).alignment=Alignment(wrap_text=True,vertical='top')
+    internal_link(detail.cell(5,1),'Overview',label='Back to findings')
+    detail.freeze_panes='A6';return detail,7
+
+
+def export_patient(session:Session,patient:str,directory:Path)->Path:
     variants=[v for v in session.variants if v.patient==patient]
-    if not variants:
-        raise ValueError('No rows for this patient.')
-    directory=Path(directory)
-    directory.mkdir(parents=True,exist_ok=True)
-    stem=re.sub(r'[^\w.-]', '_', patient).strip('.')[:80] or 'patient'
-    # Hash prevents distinct patient labels collapsing to the same sanitized filename.
-    path=directory/f'{stem}_{hashlib.sha256(patient.encode()).hexdigest()[:6]}_Solide.xlsx'
-    w=Workbook()
-    overview=w.active; overview.title='Overview'
-    add_row(overview,['SOLIDE – variant review',patient,'Tissue',session.tissue(patient)])
-    add_row(overview,['Generated',datetime.now().astimezone().isoformat(),'App version',__version__])
-    assemblies=sorted({v.assembly for v in variants})
-    add_row(overview,['Coverage applies to exported rows. Assembly: '+', '.join(assemblies)+
-                      ('. Review: mixed or unknown assembly.' if len(assemblies)>1 or 'Unknown' in assemblies else '')])
-    add_row(overview,['Gene','Transcript','Original HGVS','Reviewed HGVS','Protein','AF (%)','Coverage','Type','Call','Locus','Review status','Comment','Source findings','Assembly','Reviewed genomic variant'])
-    for v in variants:
-        if not v.selected:
-            continue
-        summaries=[]
-        for source,e in v.evidence.items():
-            current=evidence_is_current(v,e,session.tissue(patient),session)
-            label=assess_evidence(v,e,session).label
-            summaries.append(f'{source}: {label} – {e.get("summary", "")}')
-        add_row(overview,[v.gene,v.transcript,v.coding,v.corrected_hgvs,v.protein,v.af_percent,
-            v.coverage,v.kind,v.call,v.locus,
-            'HGVS reviewed' if v.nomenclature_verified else ', '.join(review_reasons(v)),
-            v.comment,'\n'.join(summaries) or 'No database searches run',v.assembly,v.controlled_genomic])
-    style_table(overview,4)
-    overview.column_dimensions['M'].width=75
-    overview.column_dimensions['L'].width=50
-    for row in range(5,overview.max_row+1):
-        overview.cell(row,6).number_format='0.00" %"'
-        overview.row_dimensions[row].height=max(45,min(150,18*(str(overview.cell(row,13).value).count('\n')+2)))
+    if not variants:raise ValueError('No rows for this patient.')
+    selected=[v for v in variants if v.selected]
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    stem=re.sub(r'[^\w.-]','_',patient).strip('.')[:70] or 'patient'
+    generated=datetime.now().astimezone();report_id=uuid.uuid4().hex[:8]
+    path=directory/f'{stem}_{hashlib.sha256(patient.encode()).hexdigest()[:6]}_Solide_{generated:%Y%m%d_%H%M%S}_{report_id}.xlsx'
+    w=Workbook();overview=w.active;overview.title='Overview';title(overview,'SOLIDE',12)
+    add_row(overview,['Patient / sample',patient,'MTBP tissue',session.tissue(patient),'Report ID',report_id])
+    add_row(overview,['Generated (UTC)',generated.astimezone(timezone.utc).replace(tzinfo=None),'App version',__version__,'Report format',2])
+    assemblies=', '.join(sorted({v.assembly for v in variants}))
+    add_row(overview,['Assembly',assemblies,'Imported rows',len(variants),'Selected variants',len(selected),'Failed QC rows',
+        sum(any(f.status=='Failed' for f in qc_flags(v)) for v in variants)])
+    headers=['Gene','Transcript','Original HGVS','Reviewed HGVS','Protein','AF (%)','Coverage','Variant ID',
+        'Imported ClinVar annotation','Type','Call','Review needed','Classification','Report decision','Reviewer',
+        'Reviewed at (UTC)','Comment','Evidence','Locus','Reviewed genomic variant','Row ID','Identity']
+    add_row(overview,headers)
+    detail_names={v.id:re.sub(r'[\\/*?:\[\]]','_',f'V{i:02}_{v.gene or "Variant"}')[:31]
+        for i,v in enumerate(selected,1) if v.evidence}
+    for v in selected:
+        labels=[f'{source}: {assess_evidence(v,e,session).label}' for source,e in ordered_evidence(v)]
+        add_row(overview,[v.gene,v.transcript,original_value(v,'Coding','Nucleotide Change','Nuc Change') or v.coding,
+            v.corrected_hgvs,v.protein,v.af_percent,v.coverage,v.variant_id,original_value(v,'ClinVar'),v.kind,v.call,
+            ', '.join(review_reasons(v)),v.classification,v.report_decision,v.reviewer,captured_time(v.reviewed_at),
+            v.comment,'\n'.join(labels) or 'No searches run',v.locus,v.controlled_genomic,v.id,v.fingerprint(session.tissue(patient))])
+        row=overview.max_row
+        if v.id in detail_names:internal_link(overview.cell(row,18),detail_names[v.id],label='\n'.join(labels) or 'Open evidence')
+        status_cell(overview.cell(row,14),v.report_decision)
+    style_table(overview,5,'SolideFindings')
+    widths={1:14,2:20,3:25,4:26,5:18,6:12,7:13,8:18,9:28,10:16,11:14,12:20,13:30,14:18,15:20,16:22,17:48,18:42,19:22,20:28}
+    from openpyxl.utils import get_column_letter
+    for column,width in widths.items():overview.column_dimensions[get_column_letter(column)].width=width
+    overview.column_dimensions['U'].hidden=True;overview.column_dimensions['V'].hidden=True
+    overview.cell(3,2).number_format='yyyy-mm-dd hh:mm'
+    for row in range(6,overview.max_row+1):
+        overview.cell(row,6).number_format='0.00" %"';overview.cell(row,7).number_format='#,##0'
+        overview.cell(row,16).number_format='yyyy-mm-dd hh:mm'
+        lines=max(str(overview.cell(row,column).value or '').count('\n')+1 for column in (17,18))
+        overview.row_dimensions[row].height=max(48,18*lines+12)
+    overview.print_area=f'A1:R{overview.max_row}'
+
     qc=w.create_sheet('Quality')
-    add_row(qc,['Gene','Category','Status','Reason','Coverage','Copy Number','Type','Call','Source row','Source file'])
+    add_row(qc,['Gene','Category','Status','Reason','Coverage','Copy Number','Type','Call','Source row','Source file','Row ID'])
     for v in variants:
-        for f in qc_flags(v):
-            add_row(qc,[v.gene,f.category,f.status,f.message,v.coverage,v.copy_number,v.kind,v.call,v.source_row,Path(v.source_file).name])
-    style_table(qc)
-    qc.column_dimensions['D'].width=65
-    raw=w.create_sheet('Raw data')
-    keys=sorted({k for v in variants for k in v.raw})
-    add_row(raw,['Row ID','Selected','Source row','Source file','Assembly',*keys])
-    for v in variants:
-        add_row(raw,[v.id,v.selected,v.source_row,Path(v.source_file).name,v.assembly,*[v.raw.get(k) for k in keys]])
-    style_table(raw)
-    audit=w.create_sheet('Searches')
-    add_row(audit,['Row ID','Gene','Source','Status','Captured at','Tissue','URL','Summary','JSON result','Match assessment'])
-    used_names=set(w.sheetnames)
-    full_reports=set()
-    for v in variants:
-        if not v.selected:
-            continue
-        name=re.sub(r'[\\/*?:\[\]]','_',v.gene or 'Variant')[:25]
-        suffix=1; candidate=name
-        while candidate in used_names:
-            suffix+=1;candidate=f'{name}_{suffix}'
-        used_names.add(candidate)
-        detail=w.create_sheet(candidate)
-        add_row(detail,[v.gene,v.corrected_hgvs or v.coding,v.protein])
-        add_row(detail,['Comment',v.comment])
-        detail.column_dimensions['A'].width=28
-        detail.column_dimensions['B'].width=90
-        cursor=4
-        for source,e in v.evidence.items():
-            current=evidence_is_current(v,e,session.tissue(patient),session)
-            state=e.get('status','Unknown') if current else 'Outdated'
+        for flag in qc_flags(v):
+            add_row(qc,[v.gene,flag.category,flag.status,flag.message,v.coverage,v.copy_number,v.kind,v.call,v.source_row,Path(v.source_file).name,v.id])
+    style_table(qc,name='SolideQuality');qc.column_dimensions['D'].width=65
+    for row in range(2,qc.max_row+1):status_cell(qc.cell(row,3),qc.cell(row,3).value)
+
+    searches=w.create_sheet('Searches')
+    add_row(searches,['Gene','Variant','Source','Result','Match assessment','Classification from source','Accession',
+        'Captured at (UTC)','Tissue','Source URL','Summary','Evidence','Row ID','JSON response'])
+    for v in selected:
+        for source,e in ordered_evidence(v):
             assessment=assess_evidence(v,e,session)
-            add_row(audit,[v.id,v.gene,source,state,e.get('captured_at'),e.get('tissue'),e.get('url'),e.get('summary'),json.dumps(e.get('raw',{}),ensure_ascii=False,default=str),assessment.label])
-            detail.cell(cursor,1,safe_text(source));detail.cell(cursor,2,safe_text(state));cursor+=1
-            detail.cell(cursor,1,'Match assessment');detail.cell(cursor,2,safe_text(assessment.label));cursor+=1
-            detail.cell(cursor,2,safe_text(e.get('summary',''))).alignment=Alignment(wrap_text=True)
-            detail.row_dimensions[cursor].height=60;cursor+=1
+            add_row(searches,[v.gene,v.corrected_hgvs or v.coding or v.protein,source,STATUS.get(e.get('status'),e.get('status','Unknown')),
+                assessment.label,source_classification(e),e.get('accession',''),captured_time(e.get('captured_at','')),
+                e.get('tissue',''),e.get('url',''),e.get('summary',''),'Open evidence',v.id,
+                json.dumps(e.get('raw',{}),ensure_ascii=False,default=str)])
+            row=searches.max_row;searches.cell(row,8).number_format='yyyy-mm-dd hh:mm'
             url=e.get('url','')
-            if url.startswith(('https://','http://')):
-                cell=detail.cell(cursor,2,url);cell.hyperlink=url;cell.style='Hyperlink';cursor+=1
-            data=e.get('raw',{})
-            images=data.get('screenshots',[])
-            if data.get('screenshot') and not images:
-                images=[{'path':data['screenshot'],'label':source}]
-            for image_info in images:
-                image_path=Path(image_info.get('path',''))
-                if not current:
-                    continue
-                if not image_path.is_file():
-                    detail.cell(cursor,2,'Screenshot missing: capture again');cursor+=1
-                    continue
-                try:
-                    image=Image(str(image_path))
-                    scale=min(1,1000/image.width)
-                    image.width*=scale;image.height*=scale
-                    detail.cell(cursor,1,safe_text(image_info.get('label',source)));cursor+=1
-                    detail.add_image(image,f'A{cursor}')
-                    cursor+=int(image.height/20)+2
-                except (OSError,ValueError):
-                    detail.cell(cursor,2,'Screenshot could not be read.');cursor+=1
+            if isinstance(url,str) and url.startswith(('https://','http://')):searches.cell(row,10).hyperlink=url
+            if v.id in detail_names:internal_link(searches.cell(row,12),detail_names[v.id])
+    style_table(searches,name='SolideSearches')
+    for letter,width in {'B':28,'E':24,'F':40,'J':55,'K':70,'L':20}.items():searches.column_dimensions[letter].width=width
+    searches.column_dimensions['N'].hidden=True
+    for row in range(2,searches.max_row+1):
+        status_cell(searches.cell(row,5),searches.cell(row,5).value)
+        searches.row_dimensions[row].height=max(48,min(180,18*(str(searches.cell(row,11).value or '').count('\n')+2)))
+
+    raw=w.create_sheet('Raw data')
+    # Preserve A–L and every subsequent exported column in source order.
+    originals=[raw_values(v) for v in variants]
+    keys=list(dict.fromkeys(key for original in originals for key in original))
+    technical=['Solide Row ID','Selected','Source row','Source file','Source sheet','Source SHA256','Assembly']
+    occupied={key.casefold() for key in keys}
+    for index,name in enumerate(technical):
+        while name.casefold() in occupied:name+=' (provenance)'
+        technical[index]=name;occupied.add(name.casefold())
+    add_row(raw,[*keys,*technical])
+    for v,original in zip(variants,originals):original_row(raw,[*[original.get(k) for k in keys],v.id,v.selected,v.source_row,Path(v.source_file).name,v.raw.get('_sheet',''),v.source_hash,v.assembly])
+    style_table(raw,name='SolideRawData');raw.freeze_panes='C2'
+
+    full_reports={}
+    for index,v in enumerate(selected,1):
+        if not v.evidence:continue
+        detail,cursor=detail_sheet(w,v,index)
+        for source,e in ordered_evidence(v):
+            assessment=assess_evidence(v,e,session);current=evidence_is_current(v,e,session.tissue(patient),session)
+            detail.cell(cursor,1,safe_text(source)).font=Font(bold=True,size=15,color=GREEN)
+            detail.cell(cursor,3,safe_text(assessment.label));status_cell(detail.cell(cursor,3),assessment.label);cursor+=1
+            for label,value in [('Source classification',source_classification(e)),('Captured at (UTC)',captured_time(e.get('captured_at',''))),
+                ('Source URL',e.get('url','')),('Summary',e.get('summary',''))]:
+                label_cell=detail.cell(cursor,1,label);label_cell.alignment=Alignment(vertical='top',wrap_text=True)
+                cell=detail.cell(cursor,2,safe_text(value));cell.alignment=Alignment(horizontal='left',wrap_text=True,vertical='top')
+                detail.merge_cells(start_row=cursor,start_column=2,end_row=cursor,end_column=8)
+                if label=='Source URL' and isinstance(value,str) and value.startswith(('https://','http://')):cell.hyperlink=value;cell.style='Hyperlink'
+                if label=='Captured at (UTC)':cell.number_format='yyyy-mm-dd hh:mm'
+                if label=='Summary':detail.row_dimensions[cursor].height=max(48,min(240,18*(str(value).count('\n')+len(str(value))//100+2)))
+                cursor+=1
+            data=e.get('raw',{});images=data.get('screenshots',[]) or ([{'path':data['screenshot'],'label':source}] if data.get('screenshot') else [])
+            if not current:
+                detail.cell(cursor,1,'Outdated evidence: rerun before reporting.');cursor+=2;continue
+            for info in images:
+                image_path=info.get('path','')
+                if valid_capture(image_path):cursor=put_image(detail,image_path,cursor,info.get('label',source))
+                else:detail.cell(cursor,1,'Screenshot missing or unreadable: capture again.');cursor+=2
             full=data.get('patient_report_screenshot')
-            if full and current and full not in full_reports:
-                full_reports.add(full)
-                attachment=w.create_sheet(f'MTBP attachment {len(full_reports)}')
-                attachment.cell(1,1,'MTBP – full report')
-                attachment.cell(2,1,safe_text(e.get('captured_at','')))
-                if Path(full).is_file():
-                    try:
-                        image=Image(full);scale=min(1,1000/image.width)
-                        image.width*=scale;image.height*=scale;attachment.add_image(image,'A4')
-                    except (OSError,ValueError):attachment.cell(4,1,'Full report could not be read.')
-                else:attachment.cell(4,1,'Full report missing. Capture again.')
-        detail.sheet_view.showGridLines=False
-        detail.freeze_panes='B4'
-    style_table(audit)
-    fd,tmp=tempfile.mkstemp(dir=directory,prefix='.solide-',suffix='.xlsx')
-    os.close(fd)
-    try:
-        w.save(tmp)
-        os.replace(tmp,path)
+            if full:
+                if full not in full_reports:
+                    full_reports[full]=f'MTBP attachment {len(full_reports)+1}'
+                    attachment=w.create_sheet(full_reports[full]);title(attachment,'MTBP full report',8)
+                    for column in 'ABCDEFGH':attachment.column_dimensions[column].width=18
+                    add_row(attachment,['Patient',patient,'Captured at (UTC)',captured_time(e.get('captured_at',''))])
+                    internal_link(attachment.cell(3,1),'Overview',label='Back to findings')
+                    if valid_capture(full):put_image(attachment,full,5,'MTBP full report')
+                    else:attachment.cell(5,1,'Full report screenshot missing or unreadable. Capture again.')
+                internal_link(detail.cell(cursor,1),full_reports[full],label='Open full MTBP report');cursor+=2
+            cursor+=2
+
+    fd,tmp=tempfile.mkstemp(dir=directory,prefix='.solide-',suffix='.xlsx');os.close(fd)
+    try:w.save(tmp);os.replace(tmp,path)
     finally:
-        if os.path.exists(tmp): os.unlink(tmp)
+        if os.path.exists(tmp):os.unlink(tmp)
         w.close()
     return path
