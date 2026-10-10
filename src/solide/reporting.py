@@ -58,6 +58,25 @@ def raw_values(v):
     return result
 
 
+def evidence_summary(v,session):
+    assessments=[assess_evidence(v,e,session) for _,e in ordered_evidence(v)]
+    if not assessments:return 'Not run'
+    labels=[a.label for a in assessments]
+    verified=labels.count('Verified match');matches=labels.count('Review match')
+    if 'Identity mismatch' in labels:state='Identity mismatch'
+    elif 'Outdated' in labels:state='Outdated'
+    elif any(a.retryable for a in assessments):state='Retry / review needed'
+    elif any(label=='Review required' for label in labels):state='Review required'
+    elif verified:state='Verified match'
+    elif matches:state='Review match'
+    elif 'No match' in labels:state='No match'
+    else:state='Not applicable'
+    counts=[]
+    if verified:counts.append(f'{verified} verified')
+    if matches:counts.append(f'{matches} review match')
+    return state+('\n'+', '.join(counts) if counts else '')
+
+
 def detail_sheet(workbook,v,index):
     name=re.sub(r'[\\/*?:\[\]]','_',f'V{index:02}_{v.gene or "Variant"}')[:31]
     detail=workbook.create_sheet(name);title(detail,f'{v.gene}  {v.corrected_hgvs or v.coding or v.protein}',8)
@@ -79,39 +98,37 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     stem=re.sub(r'[^\w.-]','_',patient).strip('.')[:70] or 'patient'
     generated=datetime.now().astimezone();report_id=uuid.uuid4().hex[:8]
     path=directory/f'{stem}_{hashlib.sha256(patient.encode()).hexdigest()[:6]}_Solide_{generated:%Y%m%d_%H%M%S}_{report_id}.xlsx'
-    w=Workbook();overview=w.active;overview.title='Overview';title(overview,'SOLIDE',12)
+    w=Workbook();overview=w.active;overview.title='Overview';title(overview,'SOLIDE',10)
     add_row(overview,['Patient / sample',patient,'MTBP tissue',session.tissue(patient),'Report ID',report_id])
     add_row(overview,['Generated (UTC)',generated.astimezone(timezone.utc).replace(tzinfo=None),'App version',__version__,'Report format',2])
     assemblies=', '.join(sorted({v.assembly for v in variants}))
     add_row(overview,['Assembly',assemblies,'Imported rows',len(variants),'Selected variants',len(selected),'Failed QC rows',
         sum(any(f.status=='Failed' for f in qc_flags(v)) for v in variants)])
-    headers=['Gene','Transcript','Original HGVS','Reviewed HGVS','Protein','AF (%)','Coverage','Variant ID',
-        'Imported ClinVar annotation','Type','Call','Review needed','Classification','Report decision','Reviewer',
-        'Reviewed at (UTC)','Comment','Evidence','Locus','Reviewed genomic variant','Row ID','Identity']
+    headers=['Gene','Variant','Protein','AF (%)','Coverage','Quality',
+        'Classification','Report decision','Evidence','Reviewer']
     add_row(overview,headers)
     detail_names={v.id:re.sub(r'[\\/*?:\[\]]','_',f'V{i:02}_{v.gene or "Variant"}')[:31]
-        for i,v in enumerate(selected,1) if v.evidence}
+        for i,v in enumerate(selected,1)}
     for v in selected:
-        labels=[f'{source}: {assess_evidence(v,e,session).label}' for source,e in ordered_evidence(v)]
-        add_row(overview,[v.gene,v.transcript,original_value(v,'Coding','Nucleotide Change','Nuc Change') or v.coding,
-            v.corrected_hgvs,v.protein,v.af_percent,v.coverage,v.variant_id,original_value(v,'ClinVar'),v.kind,v.call,
-            ', '.join(review_reasons(v)),v.classification,v.report_decision,v.reviewer,captured_time(v.reviewed_at),
-            v.comment,'\n'.join(labels) or 'No searches run',v.locus,v.controlled_genomic,v.id,v.fingerprint(session.tissue(patient))])
+        flags=qc_flags(v)
+        quality='; '.join(dict.fromkeys(flag.status for flag in flags)) or 'No row flags'
+        add_row(overview,[v.gene,v.corrected_hgvs or v.coding or v.protein,v.protein,
+            v.af_percent,v.coverage,quality,v.classification,v.report_decision,
+            evidence_summary(v,session),v.reviewer])
         row=overview.max_row
-        if v.id in detail_names:internal_link(overview.cell(row,18),detail_names[v.id],label='\n'.join(labels) or 'Open evidence')
-        status_cell(overview.cell(row,14),v.report_decision)
+        internal_link(overview.cell(row,2),detail_names[v.id],label=overview.cell(row,2).value or 'Open variant')
+        status_cell(overview.cell(row,8),v.report_decision)
+        status_cell(overview.cell(row,6),'Failed' if any(f.status=='Failed' for f in flags) else quality)
     style_table(overview,5,'SolideFindings')
-    widths={1:14,2:20,3:25,4:26,5:18,6:12,7:13,8:18,9:28,10:16,11:14,12:20,13:30,14:18,15:20,16:22,17:48,18:42,19:22,20:28}
-    from openpyxl.utils import get_column_letter
-    for column,width in widths.items():overview.column_dimensions[get_column_letter(column)].width=width
-    overview.column_dimensions['U'].hidden=True;overview.column_dimensions['V'].hidden=True
+    widths={'A':12,'B':28,'C':22,'D':10,'E':12,'F':14,'G':22,'H':17,'I':24,'J':20}
+    for column,width in widths.items():overview.column_dimensions[column].width=width
+    overview.freeze_panes='C6';overview.sheet_view.zoomScale=90
     overview.cell(3,2).number_format='yyyy-mm-dd hh:mm'
     for row in range(6,overview.max_row+1):
-        overview.cell(row,6).number_format='0.00" %"';overview.cell(row,7).number_format='#,##0'
-        overview.cell(row,16).number_format='yyyy-mm-dd hh:mm'
-        lines=max(str(overview.cell(row,column).value or '').count('\n')+1 for column in (17,18))
-        overview.row_dimensions[row].height=max(48,18*lines+12)
-    overview.print_area=f'A1:R{overview.max_row}'
+        overview.cell(row,4).number_format='0.00" %"';overview.cell(row,5).number_format='#,##0'
+        lines=max(str(overview.cell(row,c).value or '').count('\n')+1 for c in (2,9))
+        overview.row_dimensions[row].height=max(44,min(72,18*lines+12))
+    overview.print_area=f'A1:J{overview.max_row}'
 
     qc=w.create_sheet('Quality')
     add_row(qc,['Gene','Category','Status','Reason','Coverage','Copy Number','Type','Call','Source row','Source file','Row ID'])
@@ -157,7 +174,6 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
 
     full_reports={}
     for index,v in enumerate(selected,1):
-        if not v.evidence:continue
         detail,cursor=detail_sheet(w,v,index)
         for source,e in ordered_evidence(v):
             assessment=assess_evidence(v,e,session);current=evidence_is_current(v,e,session.tissue(patient),session)

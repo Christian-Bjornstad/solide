@@ -60,3 +60,15 @@ def test_raw_text_formula_characters_preserved_as_strings(tmp_path):
     cells=[w['Raw data'].cell(2,column) for column in (1,2,3)]
     assert [cell.value for cell in cells]==['=1+1','-literal','@text']
     assert all(cell.data_type=='s' for cell in cells)
+
+
+def test_overview_is_compact_and_links_unsearched_variants(tmp_path):
+    v=Variant(patient='SOURCE',gene='EGFR',coding='c.2573T>G',selected=True)
+    w=load_workbook(export_patient(Session(variants=[v]),'SOURCE',tmp_path))
+    sheet=w['Overview']
+    assert sheet.max_column==10
+    assert all(isinstance(c.value,str) for c in sheet[5])
+    assert sheet.row_dimensions[6].height<=72
+    assert sheet['I6'].value=='Not run'
+    assert sheet['B6'].hyperlink is not None
+    assert 'V01_EGFR' in w.sheetnames
