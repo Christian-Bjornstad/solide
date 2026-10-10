@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.2 — 10 October 2026
+
+- Empty MTBP reports before each submission and remove each new report after
+  local audit, including No match outcomes. The account owner requested cleanup
+  of all reports, including manual reports. Follow the latest Archer branch's
+  five-second settling and three server verification checks; cleanup failures
+  block submission. Fix report-page/list URL comparison so deletion actually
+  reaches the report list.
+
+- Notify Qt of edited row values instead of emitting a bare layout change that
+  could invalidate selection indexes during assessment saving.
+- Match equivalent one-letter/three-letter protein notation for MTBP indels
+  without conflating deletion and delins. Use English gene-context captions.
+- Put Settings headings inside their cards and wrap account status onto two lines.
+- Preserve the complete Franklin classification panel when parent elements clip
+  expanded content at Windows display scaling.
+- Wait for populated, stable MTBP report tables before matching variants or
+  capturing screenshots. Incomplete reports retain their ID for recovery.
+- Wait for the requested Edge navigation's document loader rather than the
+  previous page's ready state.
+- Search Franklin by source gene/cDNA when transcript is absent, clearly marking
+  these results for transcript review. Enable exact-allele ClinVar genomic queries.
+- Mark missing transcript or genomic inputs as review requirements rather than
+  retryable network failures.
+- Recover MTBP links that open a new tab and reconcile expired, absent submissions
+  before permitting a new analysis.
+
 ## 0.4.1 — 9 October 2026
 
 - Make dialog and popup colours readable with Windows dark themes.

@@ -189,3 +189,20 @@ def test_failed_import_is_visible_and_does_not_claim_success():
     assert 'Import failed: No variant table found.' in window.queue_log.toPlainText()
     assert not window.dirty and not window.session.variants
     window.close()
+
+
+def test_identity_edit_preserves_selected_variant_when_sort_order_changes(tmp_path):
+    from PyQt6.QtCore import Qt
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    window.config_path=tmp_path/'config.json'
+    first=Variant(patient='SOURCE',gene='EGFR')
+    window.session=Session(variants=[first,Variant(patient='SOURCE',gene='BRCA1')])
+    window.refresh();window.proxy.sort(2,Qt.SortOrder.AscendingOrder)
+    window.variant_table.selectRow(1);app.processEvents()
+    assert window.current_variant is first
+    window.gene_edit.setText('AKT1');window.save_identity();app.processEvents()
+    index=window.variant_table.currentIndex()
+    assert index.isValid()
+    assert window.session.variants[window.proxy.mapToSource(index).row()] is first
+    assert window.proxy.data(window.proxy.index(index.row(),2))=='AKT1'
+    window.dirty=False;window.close()

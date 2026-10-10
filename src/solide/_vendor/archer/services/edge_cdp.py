@@ -521,6 +521,17 @@ class EdgeCdpPage:
         deadline = time.monotonic() + timeout / 1_000
         while time.monotonic() < deadline:
             try:
+                # Page.navigate can acknowledge before the new document commits.
+                # The previous document may still report "complete" at that point.
+                # Compare the loader so a fast readiness check cannot return the
+                # old form, reports list or authentication page.
+                loader_id = response.get("loaderId")
+                if loader_id:
+                    tree = self._connection.call("Page.getFrameTree", timeout_ms=min(2_000, timeout))
+                    frame = tree.get("frameTree", {}).get("frame", {})
+                    if frame.get("loaderId") != loader_id:
+                        time.sleep(0.05)
+                        continue
                 state = self._evaluate_value(
                     "document.readyState", timeout_ms=min(2_000, timeout)
                 )

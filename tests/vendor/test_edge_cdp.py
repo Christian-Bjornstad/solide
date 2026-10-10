@@ -26,6 +26,27 @@ def test_browser_service_uses_edge_cdp_backend(tmp_path):
     assert timeout_type is EdgeCdpTimeout
 
 
+def test_navigation_does_not_accept_previous_complete_document(monkeypatch):
+    from types import SimpleNamespace
+    loaders=iter(['previous','previous','requested'])
+    state={'loader':'previous','reads':0}
+    def command(method,params=None,**kwargs):
+        if method=='Page.navigate':return {'loaderId':'requested','frameId':'main'}
+        assert method=='Page.getFrameTree'
+        state['loader']=next(loaders)
+        return {'frameTree':{'frame':{'loaderId':state['loader']}}}
+    page=EdgeCdpPage.__new__(EdgeCdpPage);page._connection=SimpleNamespace(call=command)
+    page._last_url='https://example.org/previous'
+    def evaluate(expression,**kwargs):
+        assert state['loader']=='requested','Old document must not satisfy new navigation'
+        state['reads']+=1
+        return 'complete' if expression=='document.readyState' else 'https://example.org/redirected'
+    monkeypatch.setattr(page,'_evaluate_value',evaluate)
+    monkeypatch.setattr('solide._vendor.archer.services.edge_cdp.time.sleep',lambda _:None)
+    page.goto('https://example.org/requested')
+    assert state['reads']==2 and page._last_url=='https://example.org/redirected'
+
+
 def test_local_devtools_http_ignores_enterprise_proxy(monkeypatch):
     from solide._vendor.archer.services.edge_cdp import _http_json
     import urllib.request

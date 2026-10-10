@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit, urljoin
 
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
@@ -40,7 +40,9 @@ from solide._vendor.archer.services.variant_identity import (
 
 BROWSER_DATABASES = ("COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP")
 MTBP_REPORTS_URL = "https://mtbp.org/patients/"
-MTBP_REPORT_LIMIT = 5
+MTBP_REPORT_LIMIT = 1
+MTBP_DELETE_SETTLE_MS = 5_000
+MTBP_DELETE_VERIFY_ATTEMPTS = 3
 
 LOGIN_URLS = {
     "ClinVar": "https://www.ncbi.nlm.nih.gov/clinvar/",
@@ -1610,6 +1612,12 @@ class BrowserReviewService:
                         if progress:
                             progress(f"MTBP: late report is still pending ({analysis_id})")
                         if timed_out.status in {"timeout", "submission_unknown"}:
+                            if (report_count == 0 and timed_out.status == "submission_unknown"
+                                    and self._mtbp_submission_confirmed_absent(page, timed_out)):
+                                timed_out.raw["remote_report_recovery"] = {"status": "confirmed_absent"}
+                                if progress:
+                                    progress("MTBP: analysis deadline passed; two Reports List checks "
+                                             f"confirmed absence ({analysis_id}). Submission can be retried.")
                             recovered[self.variant_key(variant)] = timed_out
                         elif timed_out.status == "partial_capture":
                             if report_count == 0:
@@ -1618,11 +1626,12 @@ class BrowserReviewService:
                                 }
                             recovered[self.variant_key(variant)] = timed_out
                         continue
-                    report_link.click()
+                    self._open_mtbp_report_link(page, report_link)
                     page.wait_for_url(
                         re.compile(r"https://mtbp\.org/patients/.+/report/\d+/?"),
                         timeout=self.navigation_timeout_ms,
                     )
+                    self._wait_for_mtbp_content(page)
                     body_text = page.locator("body").inner_text(
                         timeout=self.navigation_timeout_ms
                     )
@@ -1954,9 +1963,10 @@ class BrowserReviewService:
                         browser_timeout,
                         progress=progress,
                     )
+                failure_stage = "report_capture"
+                self._wait_for_mtbp_content(page)
                 if progress:
                     progress("MTBP: report ready; validating returned variants")
-                failure_stage = "report_capture"
                 body_text = page.locator("body").inner_text(timeout=self.navigation_timeout_ms)
                 version_tooltip = page.locator("[data-tooltip-html*='VEP:']")
                 if version_tooltip.count():
@@ -2115,8 +2125,8 @@ class BrowserReviewService:
                 else:
                     evidence = DatabaseEvidence(
                         "MTBP",
-                        "error",
-                        "An MTBP page operation timed out before report polling completed. "
+                        "partial_capture" if failure_stage == "report_capture" else "error",
+                        "An MTBP page operation timed out. "
                         f"The remote report may still be available in Reports List: {exc}",
                         accession=query,
                         url=current_url,
@@ -2198,15 +2208,36 @@ class BrowserReviewService:
         *,
         progress: Callable[[str], None] | None,
     ) -> dict[str, Any]:
-        """Free one slot from app-generated reports or refuse safely."""
+        """Empty the account report list before creating one new analysis.
+
+        The account owner explicitly requested removal of every portal report,
+        including reports created outside Solide. Local evidence is retained.
+        """
         self._goto_with_retries(page, MTBP_REPORTS_URL)
+        if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
+            raise RuntimeError("MTBP report list is unavailable; cleanup was not confirmed.")
+        buttons = page.locator("button.delete-patient")
+        identifiers = [str(buttons.nth(i).get_attribute("data-patient-name") or "")
+                       for i in range(buttons.count())]
+        if any(not name for name in identifiers) or len(set(identifiers)) != len(identifiers):
+            raise RuntimeError("MTBP report identities are missing or ambiguous; cleanup stopped.")
+        deleted = []
+        for analysis_id in identifiers:
+            self._check_cancelled()
+            outcome = self._delete_mtbp_report(page, analysis_id)
+            if outcome.get("status") not in {"deleted", "already_absent"}:
+                raise RuntimeError("MTBP report cleanup failed; no new analysis was submitted. "
+                                   + outcome.get("message", ""))
+            deleted.append(analysis_id)
+            if progress:
+                progress(f"MTBP: removed portal report {len(deleted)}/{len(identifiers)}")
         remaining = page.locator("button.delete-patient").count()
         if remaining >= MTBP_REPORT_LIMIT:
-            raise RuntimeError(
-                "MTBP report capacity is full. Remove an old report manually "
-                "in the MTBP Reports List; Solide does not delete prior reports."
-            )
-        return {"status": "retained", "remaining_reports": remaining}
+            raise RuntimeError("MTBP report list is not empty; no new analysis was submitted.")
+        if progress:
+            progress(f"MTBP: report list empty; removed {len(deleted)} report(s)")
+        return {"status": "deleted_stale" if deleted else "empty",
+                "deleted_reports": deleted, "remaining_reports": remaining}
 
     def _finalize_mtbp_report(
         self,
@@ -2217,35 +2248,24 @@ class BrowserReviewService:
         """Persist local evidence before removing one exact completed report."""
         for audit_path, evidence in audit_records:
             self._write_audit(evidence, audit_path)
-        fully_captured = bool(audit_records) and all(
-            evidence.status == "found" and evidence.raw.get("screenshots")
-            for _, evidence in audit_records
-        )
-        if fully_captured:
-            outcome = self._delete_mtbp_report(page, analysis_id)
-        else:
-            outcome = {
-                "status": "retained_incomplete",
-                "message": (
-                    "MTBP report retained because local evidence capture is "
-                    "incomplete."
-                ),
-            }
+        outcome = self._delete_mtbp_report(page, analysis_id)
         for audit_path, evidence in audit_records:
             evidence.raw["remote_report_cleanup"] = outcome
+            if outcome.get("status") not in {"deleted", "already_absent"}:
+                evidence.status = "partial_capture"
+                evidence.summary += " MTBP portal cleanup failed; retry to remove the retained report."
             self._write_audit(evidence, audit_path)
         return outcome
 
     def _delete_mtbp_report(self, page: Any, analysis_id: str) -> dict[str, str]:
-        """Delete one exact app-generated report and never touch manual report IDs."""
-        if not analysis_id.startswith("SOLIDE-"):
-            return {
-                "status": "skipped",
-                "message": "Only SOLIDE-prefixed reports may be deleted automatically.",
-            }
+        """Delete one exact report under the owner's empty-portal policy."""
+        if not analysis_id.strip():
+            return {"status": "failed", "message": "Report identity is missing."}
         try:
-            if not page.url.startswith(MTBP_REPORTS_URL):
+            if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
                 self._goto_with_retries(page, MTBP_REPORTS_URL)
+            if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
+                return {"status": "failed", "message": "MTBP report list is unavailable."}
             report_link = page.get_by_role("link", name=analysis_id, exact=True)
             report_count = report_link.count()
             if report_count == 0:
@@ -2281,22 +2301,16 @@ class BrowserReviewService:
 
             page.once("dialog", accept_confirmation)
             delete_button.click()
-            try:
-                report_link.wait_for(
-                    state="detached",
-                    timeout=self.navigation_timeout_ms,
-                )
-            except Exception:
-                self._goto_with_retries(page, MTBP_REPORTS_URL)
-            if page.get_by_role("link", name=analysis_id, exact=True).count() == 0:
-                return {
-                    "status": "deleted",
-                    "message": "The generated MTBP report was removed after local capture.",
-                }
-            return {
-                "status": "failed",
-                "message": "MTBP still listed the generated report after deletion.",
-            }
+            for _ in range(MTBP_DELETE_VERIFY_ATTEMPTS):
+                page.wait_for_timeout(MTBP_DELETE_SETTLE_MS)
+                self._goto_with_retries(page, MTBP_REPORTS_URL, attempts=2)
+                if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
+                    return {"status": "failed", "message": "Report list became unavailable."}
+                if page.get_by_role("link", name=analysis_id, exact=True).count() == 0:
+                    return {"status": "deleted",
+                            "message": "MTBP report removed; server absence verified."}
+            return {"status": "failed",
+                    "message": "MTBP still listed the report after three delayed checks."}
         except Exception as exc:
             return {
                 "status": "failed",
@@ -2335,7 +2349,10 @@ class BrowserReviewService:
             if "cannot be mapped to genomic coordinates" in body_text:
                 return body_text
             page.wait_for_timeout(500)
-        raise TimeoutError("MTBP did not accept the submitted batch before the navigation timeout.")
+        error = page.locator(".status-error")
+        detail = error.inner_text().strip() if error.count() == 1 else ""
+        raise TimeoutError("MTBP did not accept the submitted batch before the navigation timeout."
+                           + (f" Provider message: {detail[:2000]}" if detail else ""))
 
     def _wait_for_mtbp_report(
         self,
@@ -2376,7 +2393,7 @@ class BrowserReviewService:
                     "link", name=analysis_id, exact=True
                 )
                 if report_link.count() == 1:
-                    report_link.click()
+                    self._open_mtbp_report_link(page, report_link)
                     page.wait_for_url(
                         report_pattern,
                         timeout=self.navigation_timeout_ms,
@@ -2409,7 +2426,7 @@ class BrowserReviewService:
             self._goto_with_retries(page, MTBP_REPORTS_URL, attempts=2)
             report_link = page.get_by_role("link", name=analysis_id, exact=True)
             if report_link.count() == 1:
-                report_link.click()
+                self._open_mtbp_report_link(page, report_link)
                 page.wait_for_url(
                     report_pattern,
                     timeout=self.navigation_timeout_ms,
@@ -2419,6 +2436,68 @@ class BrowserReviewService:
             pass
         raise MtbpReportTimeout(
             f"MTBP report {analysis_id} was not published before the deadline."
+        )
+
+    def _mtbp_submission_confirmed_absent(self, page: Any, evidence: DatabaseEvidence) -> bool:
+        """Reconcile a lost acknowledgement only after the analysis deadline."""
+        analysis_id = str(evidence.raw.get("analysis_id") or "")
+        try:
+            submitted = datetime.fromisoformat(evidence.raw.get("submitted_at", ""))
+            expired = (datetime.now(timezone.utc) - submitted).total_seconds() * 1_000 >= self.analysis_timeout_ms
+        except (ValueError, TypeError):
+            return False
+        if not expired or not analysis_id.startswith("SOLIDE-"):
+            return False
+        # Pending rows may have no report link. An empty authenticated list has
+        # just its header row, with an explicit server-rendered zero count.
+        def absent():
+            if page.url.rstrip('/') != MTBP_REPORTS_URL.rstrip('/'):
+                return False
+            body = page.locator('body').inner_text()
+            populated = page.locator('table tr').count() >= 2
+            empty = (bool(re.search(r"Currently,\s*0\s+Reports", body))
+                     and all(header in body for header in ('Report ID','Entry Date','Cancer Type','Delete')))
+            return (populated or empty) and analysis_id not in body
+        if not absent():
+            return False
+        self._goto_with_retries(page, MTBP_REPORTS_URL)
+        return absent()
+
+    def _open_mtbp_report_link(self, page: Any, link: Any) -> None:
+        # Reports List links can open a new tab. Keep the exact selected report
+        # in the controlled tab so recovery reads and captures that report.
+        url = urljoin(MTBP_REPORTS_URL, link.get_attribute("href") or "")
+        if not re.fullmatch(r"https://mtbp\.org/patients/.+/report/\d+/?", url):
+            raise ValueError("MTBP returned an unsupported report link.")
+        self._goto_with_retries(page, url)
+
+    def _wait_for_mtbp_content(self, page: Any) -> None:
+        """A report URL can appear before its alteration tables finish loading."""
+        deadline = time.monotonic() + self.navigation_timeout_ms / 1_000
+        previous = None
+        while time.monotonic() < deadline:
+            self._check_cancelled()
+            body = page.locator("body").inner_text(timeout=self.navigation_timeout_ms)
+            rows = self._extract_mtbp_rows(page)
+            loading = page.evaluate("""() => [...document.querySelectorAll('.ajax-loader, .ui.dimmer.active')]
+                .some(node => {const style=getComputedStyle(node);
+                    return node.getBoundingClientRect().height > 0 && style.display !== 'none'
+                        && style.visibility !== 'hidden' && Number(style.opacity) > 0;})""")
+            ready = (
+                re.fullmatch(r"https://mtbp\.org/patients/.+/report/\d+/?", page.url)
+                and "Pipeline version" in body
+                and "Analysis run date" in body
+                and bool(rows)
+                and not loading
+            )
+            signature = [(row.get("gene"), row.get("identity_text")) for row in rows]
+            if ready and signature == previous:
+                return
+            previous = signature if ready else None
+            page.wait_for_timeout(500)
+        raise TimeoutError(
+            "MTBP report content did not finish loading; no absence of matches was inferred. "
+            "Retry the retained report."
         )
 
     def _goto_with_retries(
@@ -3259,7 +3338,7 @@ class BrowserReviewService:
             selected = gene_rows if gene_context else matches
             if not selected:
                 raise ValueError("MTBP capture has no rows for this gene")
-            caption = f"{variant.symbol}: genkontekst - variant ikke entydig; alle genets rader vises."
+            caption = f"{variant.symbol}: gene context - variant identity uncertain; all rows for this gene are shown."
             metadata = PngImagePlugin.PngInfo()
             metadata.add_text("match_scope", "gene_context" if gene_context else "exact_variant")
             metadata.add_text("caption", caption if gene_context else "Exact variant")
@@ -4460,12 +4539,10 @@ def _mtbp_retry_query(
 
 def _mtbp_normalized_protein(value: str) -> str:
     clean = (value or "").replace("p.", "").replace("(", "").replace(")", "").strip()
-    match = re.fullmatch(r"([A-Z][a-z]{2})(\d+)([A-Z][a-z]{2}|Ter|\*)", clean)
-    if match:
-        reference, position, alternate = match.groups()
-        reference = _AMINO_ACID_3_TO_1.get(reference, reference)
-        alternate = "*" if alternate in {"Ter", "*"} else _AMINO_ACID_3_TO_1.get(alternate, alternate)
-        clean = f"{reference}{position}{alternate}"
+    amino_acids = {**_AMINO_ACID_3_TO_1, "Ter": "*"}
+    # Convert each residue, including both ends of an indel range and inserted
+    # residues. Coordinates and operation (del, dup, delins, fs) stay unchanged.
+    clean = re.sub("|".join(amino_acids), lambda match: amino_acids[match.group()], clean)
     return clean.casefold()
 
 

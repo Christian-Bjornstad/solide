@@ -27,10 +27,16 @@ def expanded_capture_layout(page, selector: str):
                 if (style.position === 'fixed' || style.position === 'absolute')
                     node.style.setProperty('position', 'relative', 'important');
             }
-            if (node.scrollWidth > node.clientWidth + 1 && /auto|scroll|hidden/.test(style.overflowX)) {
-                node.style.setProperty('width', node.scrollWidth + 'px', 'important');
-                node.style.setProperty('max-width', 'none', 'important');
+            if (/auto|scroll|hidden|clip/.test(style.overflowX)) {
+                if (node.scrollWidth > node.clientWidth + 1) {
+                    node.style.setProperty('width', node.scrollWidth + 'px', 'important');
+                    node.style.setProperty('max-width', 'none', 'important');
+                }
+                // A clipping ancestor can report no own overflow even after
+                // its child expands. Expose it too so the document bounds
+                // include the full classification panel at Windows DPI scale.
                 node.style.setProperty('overflow-x', 'visible', 'important');
+                node.style.setProperty('overflow-y', 'visible', 'important');
             }
         }
         window.scrollTo(0, 0);

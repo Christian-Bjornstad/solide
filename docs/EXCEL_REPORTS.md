@@ -42,4 +42,9 @@ API pages remain review/error states. API use follows its
 MTBP checkpoints its analysis ID before click dispatch and cancellable waits.
 Retries of a current batch pass retained report evidence for reconciliation.
 Changed variant identity, tissue or selection creates a different batch; older
-evidence remains in history and old portal reports are not automatically deleted.
+evidence remains in history. The account owner requested an empty MTBP portal:
+all existing reports are deleted before submission, and each new report is
+deleted after local audit/capture. Deletion is verified with up to three delayed
+server checks. A failed cleanup blocks the next submission. This policy includes
+reports created outside Solide; the configured account should be dedicated to
+this workflow. Failed or incomplete captures remain explicit local statuses.

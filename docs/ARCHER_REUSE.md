@@ -4,7 +4,7 @@ Pinned source: https://github.com/Christian-Bjornstad/Archer-prosess
 Revision: 4fda67a43d8002fb2928d60211327b73943967fd
 
 Focused follow-up source: branch `feat/workstation-improvements-2026-10-07`,
-revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9 October 2026.
+revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9–10 October 2026.
 Upstream `main` still points at the base revision above. This is a selective
 port from the later branch, not a replacement of the vendor tree.
 
@@ -17,8 +17,7 @@ The original repository has no LICENSE file; this repository does not add a
 third-party redistribution license. Upstream tests are used for selected runtime
 regressions. No data files or browser profiles are copied.
 
-Further adaptations: SOLIDE- portal report prefix; previous portal reports are
-never deleted automatically; result and screenshot keys include genomic alleles
+Further adaptations: SOLIDE- portal report prefix; result and screenshot keys include genomic alleles
 and protein to avoid collisions when HGVS is absent. Patient batch selection
 participates in MTBP freshness. Solide checkpoints provisional audit captures
 as partial results until the provider returns its final result. Provider screenshots
@@ -55,7 +54,10 @@ full-report geometry also records `content_top` for report presentation.
 
 Solide retains its isolated `.solide` paths, `Other` cancer default, all-tissue
 COSMIC samples, SOLIDE report IDs, genomic-aware result/screenshot keys, and
-manual removal of old portal reports. The selected variant list is controlled
+the account owner's empty-portal policy. All old reports are removed before
+submission and the new report after local audit. Upstream five-second settling
+and three server checks verify deletion, and an exact report-list URL check
+prevents a report page from being mistaken for the list. The selected variant list is controlled
 by Solide; upstream germline/artifact skipping and the workstation UI/catalog
 rules were not imported. Default pacing remains 10â€“20 seconds. The strict
 ClinVar API verification of chromosome, GRCh37 position, REF, and ALT remains:

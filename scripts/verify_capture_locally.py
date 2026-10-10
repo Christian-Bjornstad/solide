@@ -8,6 +8,7 @@ from PIL import Image
 from solide._vendor.archer.services.edge_cdp import EdgeCdpContext
 from solide._vendor.archer.services.browser_review import BrowserReviewService
 from solide._vendor.archer.services.capture_validation import CaptureValidation
+from solide._vendor.archer.services.capture_layout import expanded_capture_layout
 import json
 from dataclasses import replace
 from solide._vendor.archer.core.models import VariantRecord
@@ -21,6 +22,16 @@ def main():
     )
     try:
         page = context.new_page()
+        clipped = """<html><body style="margin:0"><div id="outer" style="width:500px;overflow:hidden">
+        <div style="width:500px;overflow:hidden"><div id="wide" style="width:1400px;height:100px;background:lime">
+        Full classification</div></div></div></body></html>"""
+        page.goto("data:text/html," + quote(clipped))
+        before = page.evaluate("document.documentElement.scrollWidth")
+        with expanded_capture_layout(page, '#wide'):
+            assert page.evaluate("document.documentElement.scrollWidth") >= 1400
+        assert page.evaluate("document.documentElement.scrollWidth") == before
+        assert page.evaluate("getComputedStyle(document.querySelector('#outer')).overflowX") == 'hidden'
+        print('PASS nested clipping: complete right edge exposed and styles restored')
         assert page.evaluate("() => ({rows: [1, 2]})") == {"rows": [1, 2]}
         assert page.evaluate("21 * 2") == 42
         assert page.evaluate("async () => 42") == 42

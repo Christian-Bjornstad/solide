@@ -16,13 +16,31 @@ def test_solide_profile_and_cancer_defaults_are_retained(monkeypatch, tmp_path):
     assert service.mtbp_cancer_type == "Other"
 
 
-def test_old_mtbp_reports_are_never_deleted_during_preflight(tmp_path, monkeypatch):
+def test_mtbp_preflight_empties_all_report_types(tmp_path, monkeypatch):
+    service = BrowserReviewService(profile_root=tmp_path)
+    names = ["manual-report", "ARCHER-old", "SOLIDE-old"]
+    monkeypatch.setattr(service, "_goto_with_retries", lambda *args, **kwargs: None)
+    class Buttons:
+        def count(self): return len(names)
+        def nth(self, i): return SimpleNamespace(get_attribute=lambda _: names[i])
+    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda _: Buttons())
+    def delete(current, name):
+        assert current is page
+        names.remove(name)
+        return {"status": "deleted"}
+    monkeypatch.setattr(service, "_delete_mtbp_report", delete)
+    outcome = service._cleanup_stale_mtbp_reports(page, progress=None)
+    assert outcome["deleted_reports"] == ["manual-report", "ARCHER-old", "SOLIDE-old"]
+    assert outcome["remaining_reports"] == 0
+
+
+def test_failed_mtbp_deletion_blocks_new_submission(tmp_path, monkeypatch):
     service = BrowserReviewService(profile_root=tmp_path)
     monkeypatch.setattr(service, "_goto_with_retries", lambda *args, **kwargs: None)
-    monkeypatch.setattr(service, "_delete_mtbp_report", lambda *args: pytest.fail("Old reports must remain"))
-    page = SimpleNamespace(locator=lambda selector: SimpleNamespace(count=lambda: 5))
-
-    with pytest.raises(RuntimeError, match="manually"):
+    buttons = SimpleNamespace(count=lambda: 1, nth=lambda _: SimpleNamespace(get_attribute=lambda _: "old"))
+    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda _: buttons)
+    monkeypatch.setattr(service, "_delete_mtbp_report", lambda *args: {"status": "failed", "message": "still listed"})
+    with pytest.raises(RuntimeError, match="no new analysis"):
         service._cleanup_stale_mtbp_reports(page, progress=None)
 
 

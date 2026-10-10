@@ -10,6 +10,13 @@ def test_external_record_has_no_local_identifiers():
     assert r.sample != v.patient and 'PRIVATE' not in repr(r)
     assert r.hgvsc=='NM_000245.4:c.1A>T'
 
+
+def test_franklin_can_search_source_cdna_without_inventing_transcript():
+    v=Variant(gene='TP53',coding='c.742C>T',assembly='GRCh37')
+    record=query_record(v,'Franklin')
+    assert record.hgvsc=='c.742C>T' and record.transcript==''
+    with pytest.raises(ValueError):query_record(v,'ClinVar')
+
 def test_multigene_query_blocked():
     with pytest.raises(ValueError): query_record(Variant(gene='TET2,TET2-AS1'))
 

@@ -213,13 +213,13 @@ class DatabaseSearchService:
 
     def _search_clinvar(self, variant: VariantRecord) -> DatabaseEvidence:
         query = variant.hgvsc
-        if not query:
-            return DatabaseEvidence("ClinVar", "invalid_query", "Missing HGVSc.")
         expected = genomic_identity(variant)
         if expected is None:
             return DatabaseEvidence(
                 "ClinVar", "invalid_query", "Missing exact GRCh37 genomic identity."
             )
+        if not query:
+            query = f"chr{expected.chromosome}:{expected.position} {expected.reference}>{expected.alternate}"
         cache_key = "|".join(self._clinvar_queries(variant))
         if cache_key in self._clinvar_cache:
             return self._clinvar_cache[cache_key]

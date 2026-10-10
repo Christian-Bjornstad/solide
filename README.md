@@ -140,9 +140,10 @@ Changing variant identity or tissue marks older evidence as outdated. Changing
 the selected patient batch also invalidates the MTBP full report. A resumed MTBP
 search reruns the whole selected batch when needed. When identity, tissue or
 selection changes, old evidence is retained in local history and a new batch is
-created; stale report content is never reused. Existing portal reports are
-not automatically deleted; the newly generated report may be removed after local
-capture. Errors and partial captures remain distinct from **Not found**.
+created; stale report content is never reused. The MTBP account is emptied before each new submission. Every new report is
+removed after local audit/capture, with delayed server verification. Cleanup
+failures block submission and remain retryable. This includes reports created
+outside Solide, as requested by the account owner. Errors and partial captures remain distinct from **Not found**.
 
 Patient IDs, local filenames, comments and raw worksheets are not sent to providers.
 Adapters receive variant data and pseudonymous search IDs. Authenticated profiles

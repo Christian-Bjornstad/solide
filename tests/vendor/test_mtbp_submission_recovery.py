@@ -1,10 +1,29 @@
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime,timedelta,timezone
 
 import pytest
 
 from solide._vendor.archer.core.models import DatabaseEvidence, VariantRecord
 from solide._vendor.archer.services.browser_review import BrowserReviewCancelled, BrowserReviewService
+
+
+@pytest.mark.parametrize('age_minutes,body,url,expected',[
+    (21,'Reports List other report','https://mtbp.org/patients/',True),
+    (21,'Report List Currently, 0 Reports Report ID Entry Date Cancer Type Share Delete','https://mtbp.org/patients/',True),
+    (21,'Currently, 0 Reports','https://mtbp.org/patients/',False),
+    (1,'Reports List other report','https://mtbp.org/patients/',False),
+    (21,'Reports List SOLIDE-retained Processing','https://mtbp.org/patients/',False),
+    (21,'Reports List other report','https://mtbp.org/login/',False),
+])
+def test_lost_submission_requires_expired_deadline_and_two_confirmed_absence_checks(tmp_path,monkeypatch,age_minutes,body,url,expected):
+    service=BrowserReviewService(profile_root=tmp_path);reloads=[]
+    prior=DatabaseEvidence('MTBP','submission_unknown',raw={'analysis_id':'SOLIDE-retained',
+        'submitted_at':(datetime.now(timezone.utc)-timedelta(minutes=age_minutes)).isoformat()})
+    page=SimpleNamespace(url=url,locator=lambda selector:SimpleNamespace(count=lambda:1 if "Currently" in body else 3,inner_text=lambda:body))
+    monkeypatch.setattr(service,'_goto_with_retries',lambda *args:reloads.append(True))
+    assert service._mtbp_submission_confirmed_absent(page,prior) is expected
+    assert bool(reloads) is expected
 
 
 @pytest.mark.parametrize("button_ready, acknowledgement_lost, expected", [(True, False, "submission_unknown"), (False, False, "error"), (True, True, "submission_unknown")])

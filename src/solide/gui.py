@@ -59,6 +59,8 @@ QTableView { alternate-background-color: #FAFBF9; gridline-color: #EEF1EB; }
 QHeaderView::section { background: #EDF2E9; padding: 10px; border: 0; border-bottom: 1px solid #DEE5DA; font-weight: 600; }
 QGroupBox { background: white; border: 1px solid #DEE5DA; border-radius: 10px; margin-top: 12px; padding: 20px; }
 QGroupBox::title { subcontrol-origin: margin; left: 18px; padding: 0 6px; font-weight: 600; }
+QGroupBox#settingsCard { margin-top: 0; padding: 18px; }
+QLabel#settingsHeading { font-weight: 600; color: #36582C; padding-bottom: 8px; }
 QTabWidget::pane { background: white; border: 1px solid #DEE5DA; border-radius: 8px; }
 QTabBar::tab { background: transparent; color: #596454; padding: 10px 18px; border-bottom: 2px solid transparent; }
 QTabBar::tab:selected { color: #425B3D; border-bottom: 2px solid #425B3D; font-weight: 600; }
@@ -327,10 +329,14 @@ class MainWindow(QMainWindow):
 
     def build_settings(self):
         outer=self.page();scroll=QScrollArea();scroll.setFrameShape(QFrame.Shape.NoFrame);scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         content=QWidget();layout=QVBoxLayout(content);layout.setContentsMargins(0,0,0,0);layout.setSpacing(14)
         layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         scroll.setWidget(content);outer.addWidget(scroll)
-        box=QGroupBox('Workspace');form=QFormLayout(box);form.setVerticalSpacing(10)
+        box=QGroupBox();box.setObjectName('settingsCard');form=QFormLayout(box);form.setVerticalSpacing(14)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        heading=QLabel('Workspace');heading.setObjectName('settingsHeading');form.addRow(heading)
         folder=QWidget();row=QHBoxLayout(folder);row.setContentsMargins(0,0,0,0)
         self.output_dir=QLineEdit(self.config.get('output_dir',''));row.addWidget(self.output_dir,1)
         row.addWidget(self.button('Browse…',self.choose_directory));form.addRow('Workspace folder',folder)
@@ -345,7 +351,10 @@ class MainWindow(QMainWindow):
         self.output_dir.setToolTip('Use an approved local folder for reports and evidence.')
         self.background.setToolTip('Edge remote debugging must be available. Sign in directly through Edge; Solide does not store passwords.')
         self.tissue.setToolTip('Choose an exact portal option. Default: Other.')
-        account_box=QGroupBox('Database accounts');account_form=QFormLayout(account_box);account_form.setVerticalSpacing(10)
+        account_box=QGroupBox();account_box.setObjectName('settingsCard');account_form=QFormLayout(account_box);account_form.setVerticalSpacing(14)
+        account_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        account_form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        heading=QLabel('Database accounts');heading.setObjectName('settingsHeading');account_form.addRow(heading)
         self.login_source=QComboBox();self.login_source.addItems(ACCOUNT_PROVIDERS)
         self.account_username=QLineEdit();self.account_password=QLineEdit()
         self.account_password.setEchoMode(QLineEdit.EchoMode.Password)
@@ -361,7 +370,10 @@ class MainWindow(QMainWindow):
         self.login_source.currentTextChanged.connect(self.show_account);self.show_account()
         self.account_password.setToolTip('Saved only in Windows Credential Manager. Passwords are never stored in sessions or JSON settings.')
         self.background.setToolTip('Automated Edge uses a separate local profile. Saved passwords use Windows Credential Manager.')
-        layout.addWidget(QLabel('ClinVar, Mutalyzer and SpliceAI use public access.'))
+        public_access=QLabel('Public access: ClinVar, Mutalyzer, SpliceAI and BRCA Exchange.');public_access.setWordWrap(True)
+        layout.addWidget(public_access)
+        mtbp_policy=QLabel('MTBP: all portal reports are removed before each run and after local capture.');mtbp_policy.setWordWrap(True)
+        layout.addWidget(mtbp_policy)
         layout.addWidget(self.button('Open log folder',self.open_log_folder),0,Qt.AlignmentFlag.AlignLeft)
         layout.addStretch()
 
@@ -545,12 +557,20 @@ class MainWindow(QMainWindow):
         self.raw_detail.setPlainText(json.dumps({'source':v.source_file,'row':v.source_row,'assembly':v.assembly,
             'review_needed':review_reasons(v),'raw_data':v.raw,'evidence':v.evidence},ensure_ascii=False,indent=2,default=str))
 
+    def refresh_variant_row(self,variant):
+        # Values changed; row layout did not. A bare layoutChanged notification
+        # can leave Qt proxy indexes invalid during selection/detail updates.
+        row=next((i for i,v in enumerate(self.session.variants) if v is variant),None)
+        if row is not None:
+            self.variant_model.dataChanged.emit(self.variant_model.index(row,0),
+                self.variant_model.index(row,self.variant_model.columnCount()-1))
+
     def assess_variant(self):
         if self.active or not self.current_variant:return
         dialog=AssessmentDialog(self.current_variant,self)
         if dialog.exec()!=QDialog.DialogCode.Accepted:return
         save_assessment(self.session,self.current_variant,**dialog.values())
-        self.variant_model.layoutChanged.emit()
+        self.refresh_variant_row(self.current_variant)
         self.mark_dirty();self.auto_save();self.show_variant(self.variant_table.currentIndex())
         self.banner.setText('Assessment saved.')
 
@@ -568,7 +588,7 @@ class MainWindow(QMainWindow):
         v.corrected_hgvs=hgvs;v.nomenclature_verified=self.verified_check.isChecked()
         v.controlled_genomic=genomic
         self.session.history.append({'event':'identity_review','id':v.id,'time':datetime.now().astimezone().isoformat(),'hgvs':hgvs})
-        self.mark_dirty();self.variant_model.layoutChanged.emit();self.refresh_evidence();self.auto_save()
+        self.mark_dirty();self.refresh_variant_row(v);self.refresh_evidence();self.auto_save()
         self.banner.setText('Review saved. Previous evidence may be outdated.')
 
     def show_tissue(self,*args):
@@ -686,7 +706,7 @@ class MainWindow(QMainWindow):
             stored='Password saved in Windows Credential Manager' if password else 'No saved password'
         except Exception:stored='Credential Manager unavailable; use Edge sign-in'
         checked=self.config.get('login_checks',{}).get(source,{})
-        self.account_status.setText(stored+' · '+checked.get('state','Session not checked')+
+        self.account_status.setText(stored+'\n'+checked.get('state','Session not checked')+
             (' · '+checked['time'][:19].replace('T',' ') if checked.get('time') else ''))
 
     def save_account(self):

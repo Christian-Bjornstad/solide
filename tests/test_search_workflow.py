@@ -49,6 +49,14 @@ def test_found_is_not_automatically_a_verified_match(tmp_path):
     assert assess_evidence(v,e,Session(variants=[v])).label=='Missing capture'
 
 
+def test_cdna_only_franklin_hit_requires_transcript_review(tmp_path):
+    v=sample();image=image_file(tmp_path/'capture.png')
+    e={'database':'Franklin','status':'found','fingerprint':v.fingerprint('Other'),
+       'raw':{'query_basis':'gene_cdna','screenshots':[{'path':str(image)}],
+              'assembly_verified':'GRCh37','matched_location':{'position':1}}}
+    assert assess_evidence(v,e,Session(variants=[v])).label=='Review match'
+
+
 def test_explicit_identity_failure_is_not_a_valid_match(tmp_path):
     v=sample();image=image_file(tmp_path/'capture.png')
     e=result(v,'found',screenshots=[{'path':str(image)}],identity_verification={'accepted':False})
@@ -115,6 +123,18 @@ def test_forced_rerun_does_not_overwrite_other_completed_sources(monkeypatch,tmp
     module.run_queue(session,['ClinVar','Franklin'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan=plan)
     assert calls==[['ClinVar']] and v.evidence['Franklin']['summary']=='Keep me'
     assert v.evidence['ClinVar']['summary']=='Fresh search'
+
+
+@pytest.mark.parametrize('source',['Mutalyzer','SpliceAI'])
+def test_missing_identity_requires_review_instead_of_repeated_network_retry(tmp_path,source):
+    import solide.evidence as module
+    v=Variant(patient='SOURCE',gene='EGFR',coding='c.1498+22A>T',assembly='GRCh37',selected=True)
+    session=Session(variants=[v])
+    module.run_queue(session,[source],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,
+                     plan={(v.id,source)})
+    assert v.evidence[source]['status']=='needs_review'
+    assert not assess_evidence(v,v.evidence[source],session).retryable
+    assert not build_search_plan(session,[source],'failed')
 
 
 def test_brca_plan_and_queue_never_query_other_genes(monkeypatch,tmp_path):

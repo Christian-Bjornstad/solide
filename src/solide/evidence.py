@@ -82,6 +82,8 @@ def assess_evidence(v, evidence, session):
                 return EvidenceAssessment('Missing capture','Result screenshot is missing.',True)
             if source=='MTBP' and not valid_capture(raw.get('patient_report_screenshot','')):
                 return EvidenceAssessment('Missing capture','Full MTBP report screenshot is missing.',True)
+        if raw.get('query_basis')=='gene_cdna':
+            return EvidenceAssessment('Review match','Gene / cDNA search; confirm the transcript and genomic identity.')
         if raw.get('query_basis')=='gene_protein_or_identifier':
             return EvidenceAssessment('Review match','Gene / protein or identifier search; genomic identity unconfirmed.')
         genomic_verified=raw.get('assembly_verified')=='GRCh37' and bool(raw.get('matched_location'))
@@ -136,10 +138,12 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
     try:
         hgvsc = hgvs_query(v)
     except ValueError:
+        if source=='Franklin' and re.fullmatch(r'c\.\S+',v.coding):
+            hgvsc=v.coding
         protein_only=(source in {'MTBP','OncoKB','Franklin'} and
                       bool(re.fullmatch(r'p\.[A-Za-z0-9_*?()=]+',v.protein)))
         cosmic_id_only=source=='COSMIC' and v.variant_id.startswith('COSM')
-        if not (v.locus and v.ref and v.alt) and not protein_only and not cosmic_id_only:
+        if not hgvsc and not (v.locus and v.ref and v.alt) and not protein_only and not cosmic_id_only:
             raise
     locus,ref,alt=v.locus,v.ref,v.alt
     if v.corrected_hgvs:
@@ -243,6 +247,8 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                         store(v,source,{'status':'found' if scores else 'needs_review',
                                       'summary':spliceai_summary(data)+'\nGRCh37, distance=500, mask=1.',
                                       'raw':data,'url':'https://spliceailookup.broadinstitute.org/'})
+                except ValueError as exc:
+                    store(v,source,{'status':'needs_review','summary':str(exc)})
                 except Exception as exc:
                     if source == 'SpliceAI':
                         last_splice=time.monotonic()
@@ -307,6 +313,9 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             data=asdict(result)
                             if 'provisional_status' not in data.get('raw',{}):returned.add(v.id)
                             record=mapping[key][0][1]
+                            if source=='Franklin' and record.hgvsc.startswith('c.'):
+                                data.setdefault('raw',{})['query_basis']='gene_cdna'
+                                data['summary']+='\nGene / cDNA search; transcript and genomic identity require review.'
                             if not record.hgvsc and not record.ref_allele:
                                 data.setdefault('raw',{})['query_basis']='gene_protein_or_identifier'
                                 data['summary']+='\nGene / protein or variant ID search; genomic identity unconfirmed.'

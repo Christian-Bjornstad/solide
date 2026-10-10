@@ -1,7 +1,7 @@
 import os
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 from PyQt6.QtGui import QPalette,QColor
-from PyQt6.QtWidgets import QApplication,QDialog
+from PyQt6.QtWidgets import QApplication,QDialog,QFormLayout,QScrollArea
 from solide.gui import MainWindow
 from solide.assessment import AssessmentDialog
 from solide.models import Variant
@@ -46,5 +46,22 @@ def test_text_size_setting_applies_without_clipping_progress(tmp_path):
             rendered=window.progress.grab().toImage()
             background=luminance(rendered.pixelColor(12,rendered.height()//2))
             assert (max(foreground,background)+.05)/(min(foreground,background)+.05)>=4.5
+    finally:
+        window.dirty=False;window.close()
+
+
+def test_settings_status_and_forms_remain_readable_at_large_text():
+    app=QApplication.instance() or QApplication([]);window=MainWindow()
+    try:
+        window.config['login_checks']={'Franklin':{'state':'Last sign-in confirmed','time':'2026-10-09T15:18:14'}}
+        window.login_source.setCurrentText('Franklin');window.show_account()
+        assert '\n' in window.account_status.text()
+        window.text_size.setCurrentIndex(window.text_size.findData(20))
+        window.resize(1050,700);window.nav.setCurrentRow(3);window.show();app.processEvents()
+        scroll=window.pages.currentWidget().findChild(QScrollArea)
+        assert scroll.horizontalScrollBar().maximum()==0
+        forms=scroll.findChildren(QFormLayout)
+        assert all(form.fieldGrowthPolicy()==QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow for form in forms)
+        assert window.account_status.height()>=2*window.account_status.fontMetrics().height()
     finally:
         window.dirty=False;window.close()
