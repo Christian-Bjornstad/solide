@@ -7,6 +7,9 @@ from pathlib import Path
 from .models import Variant, ImportResult
 
 
+SOLIDE_REPORT_IDENTIFIER = 'solide:variant-review-report'
+
+
 def text(value) -> str:
     return '' if value is None else str(value).strip()
 
@@ -24,6 +27,69 @@ def normalize_assembly(value: str) -> str:
             'grch38': 'GRCh38'}.get(text(value).lower(), 'Unknown')
 
 
+def _count(value) -> int | None:
+    value = text(value)
+    if not re.fullmatch(r'[0-9]+', value):
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def export_scope(metadata: dict, exported_variant_count: int) -> dict | None:
+    """Retain source counts without inferring completeness from missing metadata."""
+    names = {
+        'total_variant_count': 'totalVariantCount',
+        'filtered_in_count': 'filterInCount',
+        'filtered_out_count': 'filteredOutCount',
+        'hidden_variant_count': 'hiddenVariantCount',
+    }
+    counts = {name: _count(metadata.get(source)) for name, source in names.items()}
+    if all(value is None for value in counts.values()):
+        return None
+    counts['exported_variant_count'] = exported_variant_count
+    counts['filtered_export'] = (
+        (counts['total_variant_count'] is not None and counts['total_variant_count'] > exported_variant_count)
+        or (counts['filtered_out_count'] or 0) > 0
+        or (counts['hidden_variant_count'] or 0) > 0
+    )
+    return counts
+
+
+def export_scope_warning(scope: dict) -> str:
+    if not scope.get('filtered_export'):
+        return ''
+    details = [f"{scope['exported_variant_count']:,} imported rows"]
+    total = scope.get('total_variant_count')
+    if total is not None:
+        details.append(f'{total:,} total source variants')
+    for key, label in [('filtered_out_count', 'filtered out'), ('hidden_variant_count', 'hidden')]:
+        value = scope.get(key)
+        if value:
+            details.append(f'{value:,} {label}')
+    return 'Filtered export: ' + ', '.join(details) + '. QC covers imported rows only.'
+
+
+def _is_solide_report(identifier, tables) -> bool:
+    if text(identifier) == SOLIDE_REPORT_IDENTIFIER:
+        return True
+    # Older reports lack a document identifier; their title and paired metadata
+    # establish their origin even when only Raw data remains import-eligible.
+    for _, rows in tables:
+        if not rows or not rows[0] or text(rows[0][0]).casefold() != 'solide':
+            continue
+        pairs = {
+            text(row[index]).casefold(): text(row[index + 1])
+            for row in rows[:12] for index in range(len(row) - 1)
+        }
+        version = pairs.get('app version', '')
+        report_format = _count(pairs.get('report format'))
+        if re.fullmatch(r'\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?', version) and report_format:
+            return True
+    return False
+
+
 def load_file(path: Path) -> ImportResult:
     path = Path(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -31,8 +97,12 @@ def load_file(path: Path) -> ImportResult:
     if path.suffix.lower() == '.xlsx':
         from openpyxl import load_workbook
         w = load_workbook(path, read_only=True, data_only=True)
-        tables = [(sheet.title, list(sheet.values)) for sheet in w]
-        w.close()
+        try:
+            tables = [(sheet.title, list(sheet.values)) for sheet in w]
+            if _is_solide_report(w.properties.identifier, tables):
+                raise ValueError('Solide report detected. Choose the original TSV/XLSX export instead of a generated report.')
+        finally:
+            w.close()
     elif path.suffix.lower() == '.tsv':
         payload = path.read_bytes()
         try:
@@ -103,6 +173,13 @@ def load_file(path: Path) -> ImportResult:
                 {'snp', 'snv', 'del', 'ins', 'indel', 'mnp', 'complex'}, raw=raw))
     if not variants:
         raise ValueError('No variant table with Type and Gene/Genes found. Check the export format.')
+    scope = export_scope(metadata, len(variants))
+    if scope is not None:
+        for variant in variants:
+            variant.raw['_export_scope'] = dict(scope)
+        warning = export_scope_warning(scope)
+        if warning:
+            warnings.append(warning)
     if assembly == 'Unknown':
         warnings.append('Assembly missing. Confirm hg19 before genomic searches.')
     if metadata.get('analysisName') and hint and hint not in metadata['analysisName']:
