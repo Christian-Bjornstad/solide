@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 from PIL import Image as PillowImage
 from openpyxl.drawing.image import Image
-from openpyxl.styles import Alignment,Font,PatternFill
+from openpyxl.styles import Alignment,Font,PatternFill,Border,Side
 from openpyxl.worksheet.table import Table,TableStyleInfo
 from openpyxl.utils import get_column_letter
 
@@ -46,9 +46,11 @@ def title(sheet,text,width=8):
     sheet.sheet_view.zoomScale=90
     sheet.sheet_properties.tabColor=GREEN
     sheet.merge_cells(start_row=1,start_column=1,end_row=1,end_column=width)
-    cell=sheet.cell(1,1,safe_text(text));cell.font=Font(name='Calibri',size=22,bold=True,color='FFFFFF')
-    cell.fill=PatternFill('solid',fgColor=GREEN);cell.alignment=Alignment(vertical='center')
-    sheet.row_dimensions[1].height=40
+    cell=sheet.cell(1,1,safe_text(text));cell.font=Font(name='Calibri',size=16,bold=True,color=GREEN)
+    cell.alignment=Alignment(vertical='center')
+    for column in range(1,width+1):
+        sheet.cell(1,column).border=Border(bottom=Side(style='thin',color=GREEN))
+    sheet.row_dimensions[1].height=32
 
 
 def style_table(sheet,header_row=1,name=None):
@@ -65,7 +67,8 @@ def style_table(sheet,header_row=1,name=None):
     for row in sheet.iter_rows(min_row=header_row+1):
         sheet.row_dimensions[row[0].row].height=36
         for cell in row:
-            cell.font=Font(name='Calibri',size=11,color=INK)
+            cell.font=Font(name='Calibri',size=11,color='176B94' if cell.hyperlink else INK,
+                           underline='single' if cell.hyperlink else None)
             cell.alignment=Alignment(vertical='top',wrap_text=True)
             if cell.row%2==0:cell.fill=PatternFill('solid',fgColor=PALE)
     for column in range(1,sheet.max_column+1):
@@ -84,14 +87,15 @@ def style_table(sheet,header_row=1,name=None):
 def status_cell(cell,status):
     if status in {'Failed','Error','Timeout','Identity mismatch','Missing capture','Sign-in required','Ambiguous match'}:
         cell.fill=PatternFill('solid',fgColor=FAIL)
-    elif status in {'Unknown','Review','Review required','Review match','Outdated','Pending'}:
+    elif status in {'Unknown','Review','Review required','Review match','Outdated','Pending','Review query','Retry / review needed'}:
         cell.fill=PatternFill('solid',fgColor=WARN)
 
 
 def internal_link(cell,sheet,row=1,label='Open evidence'):
     cell.value=safe_text(label)
     cell.hyperlink=f"#'{sheet.replace(chr(39),chr(39)*2)}'!A{row}"
-    cell.style='Hyperlink'
+    cell.font=Font(name='Calibri',size=11,color='176B94',underline='single')
+    cell.alignment=Alignment(wrap_text=True,vertical='top')
 
 
 def put_image(sheet,path,row,label='',crop_top=0):

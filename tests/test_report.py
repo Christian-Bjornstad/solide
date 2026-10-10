@@ -43,4 +43,10 @@ def test_report_embeds_current_variant_image_and_full_mtbp_report(tmp_path):
     with zipfile.ZipFile(report) as archive:
         assert len([n for n in archive.namelist() if n.startswith('xl/media/')])==2
     w=load_workbook(report)
-    assert 'MTBP attachment 1' in w.sheetnames
+    assert 'Evidence' in w.sheetnames
+    assert any('MTBP full report' in str(c.value) for row in w['Evidence'] for c in row)
+    sheet=w['Evidence'];last_image=sheet._images[-1]
+    assert max(sheet.row_dimensions)>last_image.anchor._from.row+1
+    import re
+    print_last=int(re.search(r'\$H\$(\d+)$',str(sheet.print_area)).group(1))
+    assert print_last>=max(sheet.row_dimensions)
