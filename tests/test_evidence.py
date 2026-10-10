@@ -24,9 +24,9 @@ def test_unverified_delins_blocked():
     with pytest.raises(ValueError): query_record(Variant(gene='MET',coding='c.1_2delinsTT'))
 
 def test_mane_does_not_swap_accession():
-    v=Variant(gene='MET',transcript='NM_001174067.1',coding='c.1A>T')
+    v=Variant(gene='MET',transcript='NM_001127500.3',coding='c.1A>T')
     with pytest.raises(ValueError): query_record(v)
-    assert hgvs_query(v)=='NM_001174067.1:c.1A>T'
+    assert hgvs_query(v)=='NM_001127500.3:c.1A>T'
 
 def test_genomic_query_requires_assembly_and_alleles():
     v=Variant(locus='chr7:123',ref='A',alt='T',assembly='GRCh37')

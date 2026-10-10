@@ -137,6 +137,49 @@ def test_missing_identity_requires_review_instead_of_repeated_network_retry(tmp_
     assert not build_search_plan(session,[source],'failed')
 
 
+def test_mutalyzer_validation_and_mapping_issues_remain_reviewable(monkeypatch,tmp_path):
+    import solide.evidence as module
+    v=Variant(patient='SOURCE',gene='FGFR1',selected=True)
+    session=Session(variants=[v])
+    monkeypatch.setattr(module,'normalize_variant',lambda v:{'normalization':{'errors':[
+        {'code':'ESEQUENCEMISMATCH','details':'Reference mismatch'}]},'mapping_issue':'Target mapping unavailable'})
+    module.run_queue(session,['Mutalyzer'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan={(v.id,'Mutalyzer')})
+    evidence=v.evidence['Mutalyzer']
+    assert evidence['status']=='needs_review'
+    assert 'ESEQUENCEMISMATCH' in evidence['summary'] and 'Target mapping unavailable' in evidence['summary']
+    assert not assess_evidence(v,evidence,session).retryable
+
+
+def test_spliceai_match_requires_complete_hg19_response():
+    v=Variant(patient='SOURCE',gene='TP53',locus='chr17:7577609',ref='C',alt='T',assembly='GRCh37',selected=True)
+    score={**{key:'0.0' for key in ('DS_AG','DS_AL','DS_DG','DS_DL')},
+           **{key:0 for key in ('DP_AG','DP_AL','DP_DG','DP_DL')}}
+    response={'variant':'chr17-7577609-C-T','chrom':'17','pos':7577609,'ref':'C','alt':'T',
+              'hg':37,'genomeVersion':'37','distance':500,'mask':1,'scores':[score]}
+    evidence={'database':'SpliceAI','status':'found','fingerprint':v.fingerprint('Other'),
+              'raw':{'query':response['variant'],'response':response}}
+    session=Session(variants=[v])
+    assert assess_evidence(v,evidence,session).label=='Verified match'
+    response['hg']=38
+    assert assess_evidence(v,evidence,session).label=='Review required'
+
+
+def test_spliceai_validation_responses_keep_request_spacing(monkeypatch,tmp_path):
+    import solide.evidence as module
+    waits=[]
+    variants=[Variant(patient='SOURCE',gene='TP53',coding='c.673-1G>A',locus='chr17:7577609',
+        ref='C',alt='T',assembly='GRCh37',selected=True) for _ in range(2)]
+    class Control(module.QueueControl):
+        def wait(self,seconds):waits.append(seconds)
+    def invalid_response(v):raise ValueError('Response was incomplete')
+    monkeypatch.setattr(module,'spliceai_variant',invalid_response)
+    session=Session(variants=variants)
+    module.run_queue(session,['SpliceAI'],tmp_path,Control(),lambda *args:None,lambda message:None,
+        plan={(v.id,'SpliceAI') for v in variants})
+    assert len(waits)==2 and waits[1]>29
+    assert all(v.evidence['SpliceAI']['status']=='needs_review' for v in variants)
+
+
 def test_brca_plan_and_queue_never_query_other_genes(monkeypatch,tmp_path):
     import solide.evidence as module
     calls=[]

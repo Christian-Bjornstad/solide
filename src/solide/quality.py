@@ -2,8 +2,8 @@ from dataclasses import dataclass
 import re
 from .models import Variant
 
-MANE_TARGETS = {'FGFR1': ('NM_001127500.3', 'NM_023110.3'),
-                'MET': ('NM_001174067.1', 'NM_000245.4')}
+MANE_TARGETS = {'FGFR1': ('NM_001174067.1', 'NM_023110.3'),
+                'MET': ('NM_001127500.3', 'NM_000245.4')}
 
 
 @dataclass(frozen=True)

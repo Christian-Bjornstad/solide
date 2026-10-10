@@ -11,7 +11,7 @@ from functools import lru_cache
 from PIL.Image import DecompressionBombError
 from .models import Variant, Session
 from .quality import review_reasons, MANE_TARGETS
-from .nomenclature import hgvs_query, genomic_query, normalize_variant, spliceai_variant, spliceai_summary
+from .nomenclature import hgvs_query, genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
 from .brca_exchange import brca_exchange_variant
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
@@ -90,8 +90,13 @@ def assess_evidence(v, evidence, session):
         exact_identity=identity.get('accepted') is True and bool(identity.get('requested')) and identity.get('requested')==identity.get('returned')
         splice_verified=False
         if source=='SpliceAI':
-            try:splice_verified=raw.get('query')==genomic_query(v)==raw.get('response',{}).get('variant')
-            except ValueError:pass
+            try:
+                requested=genomic_query(v)
+                if raw.get('query')==requested:
+                    validate_spliceai_response(raw.get('response',{}),requested)
+                    splice_verified=bool(raw.get('response',{}).get('scores'))
+            except ValueError as exc:
+                return EvidenceAssessment('Review required',f'SpliceAI response requires validation: {exc}')
         if genomic_verified or exact_identity or splice_verified:
             basis='versioned HGVS' if identity.get('method')=='full_hgvs' else 'genomic identity'
             return EvidenceAssessment('Verified match',f'Returned {basis} matches the request. Review clinical interpretation separately.')
@@ -230,19 +235,28 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                         data=normalize_variant(v)
                         norm=data['normalization']
                         errors=norm.get('errors') or []
-                        status='error' if errors else 'needs_review'
+                        status='needs_review'
                         summary=norm.get('normalized_description') or 'See the Mutalyzer response.'
+                        if errors:
+                            summary='HGVS validation requires review:\n'+'\n'.join(
+                                f"{error.get('code','Validation error')}: {error.get('details') or error.get('message') or error}"
+                                if isinstance(error,dict) else str(error) for error in errors)
                         if data.get('mapping'):
                             summary += '\nMANE suggestion: ' + str(data['mapping'].get('mapped_description',data['mapping']))
+                        if data.get('mapping_issue'):
+                            summary += '\n' + data['mapping_issue']
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'})
                     elif source == 'BRCA Exchange':
                         query_record(v,source)
                         store(v,source,brca_exchange_variant(v))
                     else:
+                        genomic_query(v)
                         control.wait(max(0, 30 - (time.monotonic() - last_splice)))
-                        data=spliceai_variant(v)
-                        last_splice=time.monotonic()
+                        try:
+                            data=spliceai_variant(v)
+                        finally:
+                            last_splice=time.monotonic()
                         scores=data.get('response',{}).get('scores',[])
                         store(v,source,{'status':'found' if scores else 'needs_review',
                                       'summary':spliceai_summary(data)+'\nGRCh37, distance=500, mask=1.',
@@ -250,8 +264,6 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                 except ValueError as exc:
                     store(v,source,{'status':'needs_review','summary':str(exc)})
                 except Exception as exc:
-                    if source == 'SpliceAI':
-                        last_splice=time.monotonic()
                     store(v,source,{'status':'error','summary':str(exc)})
         service=BrowserReviewService(profile_root=Path.home()/'.solide'/'browser_profiles',
             mtbp_cancer_type=session.tissue(patient), stop_requested=control.stopped.is_set,
