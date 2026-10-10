@@ -109,10 +109,19 @@ differences require mapped, reviewed HGVS on the target transcript:
 
 | Gene | Exported transcript | Target transcript |
 |---|---|---|
-| FGFR1 | NM_001127500.3 | NM_023110.3 |
-| MET | NM_001174067.1 | NM_000245.4 |
+| FGFR1 | NM_001174067.1 | NM_023110.3 |
+| MET | NM_001127500.3 | NM_000245.4 |
+
+The original requirements had the exported accessions exchanged between these
+genes. Their gene assignments were checked against the NCBI records for
+[FGFR1](https://www.ncbi.nlm.nih.gov/nuccore/NM_001174067.1) and
+[MET](https://www.ncbi.nlm.nih.gov/nuccore/NM_001127500.3). Original import values
+are preserved; a mapper's suggestion still needs identity review.
 
 Mutalyzer returns suggestions for manual approval in **Identity review**.
+When no transcript is available, explicit confirmed GRCh37 REF/ALT can provide
+a genomic normalization query. A failed optional MANE mapping retains the
+normalization and records its limitation.
 Corrected HGVS never silently reuses original genomic alleles. Enter matching
 reviewed hg19 `chr-pos-REF-ALT` when a genomic lookup is needed after correction.
 
@@ -150,26 +159,31 @@ Adapters receive variant data and pseudonymous search IDs. Authenticated profile
 stay under `%USERPROFILE%\.solide\browser_profiles`. Source files, sessions,
 reports, credentials and browser profiles are excluded from Git.
 
-Small live ClinVar, Franklin, COSMIC and OncoKB searches were tested locally with
-supplied variant data, including captures and a successful retry after an Edge
-startup failure. MTBP returned **Sign-in required** and needs a fresh sign-in
-before **Other** and full-report capture can be tested. Institutional access
-and the work-PC environment still require a laboratory pilot.
+Live ClinVar, Franklin, COSMIC, OncoKB and authenticated MTBP searches were tested
+locally with supplied variant data, including captures, retries, tissue **Other**,
+full-report capture and verified MTBP deletion. Institutional access and the
+work-PC environment still require a laboratory pilot.
 
 ## Excel reports
 
 Each export creates a new timestamped workbook per patient without replacing
 previous files. The original exports remain untouched.
 
-- **Overview**: selected variants, original and reviewed descriptions, imported
-  annotation, app classification/decision/reviewer/notes, and evidence links.
-- **Quality**: all QC flags, including unselected rows, with row provenance.
-- **Searches**: result and match status, source assertion, accession, capture time,
-  links and source responses.
+- **Overview**: eight compact columns with stacked variant identity, numeric
+  AF/coverage, QC status, app classification/decision and linked match summaries.
+- **Quality**: all QC flags, including unselected rows and Report/Review/Unknown
+  statuses, with links to the exact original row.
+- **Evidence**: linked variant index, full app assessments, imported annotations,
+  reviewed identity, source assertions and current source captures. Shared full
+  MTBP reports appear once in this worksheet. Long notes split into readable rows.
 - **Raw data**: original source values and column order, including unnamed
   columns, followed by source hash, sheet and physical row references.
-- Variant sheets and a shared full MTBP attachment appear when evidence exists.
-  Tall captures are segmented at readable width; outdated screenshots are omitted.
+- **Searches** (hidden audit worksheet): every result, match status, accession,
+  timestamp, URL and source response, with links to its exact Evidence section.
+  Unhide the worksheet in Excel when the full technical record is needed.
+
+Tall captures are segmented at readable width without altering source pixels;
+outdated screenshots are omitted. Report format 3 has four visible worksheets.
 
 `Include`, `Exclude` and `Pending` are saved app decisions. The workbook retains
 every selected variant with its decision for review; it does not automatically
@@ -178,7 +192,10 @@ Default manual categories follow the reference template, and custom laboratory
 classification text can be entered.
 
 Import supports original Ion Reporter TSV and Genexus TSV/XLSX exports with one
-unambiguous variant table. Reviewed child templates, target/gene coverage tables
+unambiguous variant table. The supplied Childhood/Oncomine Ion export and
+Genexus/OPA exports were both verified. Ion metadata that indicates a filtered
+export produces an import warning and report scope note; QC covers supplied
+rows rather than variants omitted by upstream filters. Reviewed child templates, target/gene coverage tables
 and sample-level QC sheets are separate source structures and are not imported
 as variants. ZIP archives were inspected as design references; extract an original
 TSV/XLSX export locally before importing. Duplicate columns or competing variant

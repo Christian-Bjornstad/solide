@@ -23,7 +23,7 @@ window.session=Session(variants=[
             reviewer='Demo reviewer',platform='Genexus',source_row=2),
     Variant(patient='DEMO-001',gene='TP53',transcript='NM_000546.6',coding='c.743G>A',protein='p.R248Q',
             af_percent=25.8,coverage=6355,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),
-    Variant(patient='DEMO-001',gene='MET',transcript='NM_001174067.1',coding='c.3029C>T',protein='p.T1010I',
+    Variant(patient='DEMO-001',gene='MET',transcript='NM_001127500.3',coding='c.3029C>T',protein='p.T1010I',
             af_percent=8.2,coverage=420,kind='SNV',call='PRESENT',assembly='GRCh37',selected=False),
     Variant(patient='DEMO-001',gene='BRCA1',transcript='NM_007294.4',coding='c.5346+5C>A',
             af_percent=12.4,coverage=2200,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),

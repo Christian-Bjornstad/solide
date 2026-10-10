@@ -1,10 +1,14 @@
-# Verification — Solide v0.4.2
+# Verification — Solide v0.5.0
 
 Dates: 9–10 October 2026. Local Windows / Python 3.12.
 
 ## Automated and runtime checks
 
-- `python -m pytest -q`: **247 tests passed**. Fixtures are synthetic; the optional
+- v0.5.0: `python -m pytest -q` passed **304 tests** in 21.86 seconds; compileall
+  passed. Publishable paths and Git history contained no input/report files,
+  private identifiers or keys. Saved passwords remain in the Windows vault.
+
+- The v0.4.2 baseline had **247 passing tests**. Fixtures are synthetic; the optional
   local reference test reads ignored laboratory files without external lookups.
 - Compileall passed for source, scripts and the Python FELLES install/start helpers.
 - Assessment/identity edits notify changed model values, preserving the selected
@@ -111,7 +115,7 @@ The reviewed child templates are design references rather than importable raw
 variant tables. Their target/gene coverage is not treated as variant Coverage.
 Clinical scoring formulas were not copied into an automatic classifier.
 
-## Fresh authenticated run � 9�10 October 2026
+## Fresh authenticated run — 9–10 October 2026
 
 The supplied raw files were imported again into a new local session: **3,214
 rows, three independent datasets and 27 selected variants**. The two-row export
@@ -151,6 +155,53 @@ with fresh captures, local Excel and verified remote deletion. An independent
 subsequent visit confirmed zero reports. The final MTBP outcomes are nine
 Review match, one No match, five Review required and twelve Review query.
 There are no remaining uncertain submissions in this session.
+
+## Excel format 3 and public services — 10 October 2026
+
+Both raw workflows were rechecked: the Ion TSV metadata identifies the
+Childhood/Oncomine workflow; Genexus/OPA raw XLSX and the separate SNV/indel TSV
+are accepted. The Childhood TSV is filtered: 8 exported rows out of 3,385 total
+variants, with 3,377 filtered out upstream. Source counts now accompany each row
+and produce an explicit import warning and report scope note. Reviewed Childhood
+workbooks remain design references and are not accepted as raw variant exports.
+
+Three new actual workbooks use four visible worksheets: Overview, Quality,
+Evidence and Raw data, with a hidden Searches audit. Independent read-only
+verification checked 3,214 unchanged raw rows, 27 selected findings, 189 source
+records, 408 valid internal links, 374 pixel-exact image segments and four unique
+full MTBP reports. All 13 Genexus flags remain: four Failed CNV, five Failed
+expression imbalance and four Report RNAExonVariant. All original source hashes
+were unchanged. No clinical assessments were invented or read back from Excel.
+
+Actual overview, QC, evidence index, raw data and first/middle/last variant
+sections were rendered read-only and inspected. Long multiline notes retain all
+text in readable rows; final image segments are included in the print area.
+Generated reports have an explicit document marker, with a legacy recognition
+fallback, and cannot be reimported as raw data.
+
+Mutalyzer normalized all ten actual selected variants with sufficiently explicit
+HGVS or hg19 alleles. Two deletion positions shift after HGVS normalization;
+these remain review candidates. HTTP 422 HGVS validation reasons are preserved
+as review evidence. An optional mapping failure does not discard normalization.
+The source accessions in the original requirements were swapped between genes:
+[FGFR1 NM_001174067.1](https://www.ncbi.nlm.nih.gov/nuccore/NM_001174067.1) and
+[MET NM_001127500.3](https://www.ncbi.nlm.nih.gov/nuccore/NM_001127500.3) are now
+associated correctly. Both mappings to the requested target transcripts succeeded
+on public reference controls; this does not automatically approve patient HGVS.
+
+SpliceAI returned 19 transcript predictions on a published intronic TP53 control
+(maximum delta score 0.998), and valid predictions on two supplied exonic service
+controls. The three selected intronic rows still lack REF/ALT and remain review
+requirements. No alleles or transcripts were guessed. Assembly, request settings,
+returned/trimmed alleles and numeric scores are checked; request spacing also
+applies after validation rejections. Current gene/transcript fields are displayed.
+[Official API and server documentation](https://github.com/broadinstitute/SpliceAI-lookup).
+
+BRCA Exchange matched published BRCA1 and BRCA2 controls through both exact hg19
+genomic and full versioned HGVS searches. ENIGMA assertions, exact identity and
+dataset release were retained. The actual selected rows contain no BRCA1/2
+variant, so these are reference tests rather than patient BRCA results.
+[Official BRCA Exchange API](https://brcaexchange.org/about/api).
 
 ## Work-PC pilot remains
 

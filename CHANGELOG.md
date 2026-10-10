@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0 — 10 October 2026
+
+- Reduce Excel to four visible worksheets: compact Overview, all-row Quality,
+  indexed Evidence and ordered Raw data. Keep the complete Searches audit hidden
+  by default. Link findings, source results and raw rows directly; put shared
+  full MTBP reports once in Evidence, preserve lossless capture segments and split
+  long assessment notes into readable rows without discarding text.
+- Warn when source metadata describes a filtered export; row QC does not imply
+  complete assay coverage. Reject generated Solide workbooks explicitly as input.
+- Correct FGFR1/MET transcript assignments using NCBI gene records. Preserve
+  successful Mutalyzer normalization if optional mapping fails and support
+  explicit genomic GRCh37 normalization when a transcript is unavailable.
+- Display current SpliceAI gene/transcript fields and validate assembly, query
+  parameters, returned alleles and prediction score ranges before a verified match.
+
 ## 0.4.2 — 10 October 2026
 
 - Empty MTBP reports before each submission and remove each new report after

@@ -129,10 +129,13 @@ REF og ALT samt normalisering for indels. Locus alene er ikke en unik variant.
 Genexus-XLSX mangler separate REF/ALT- og transkriptkolonner; disse må hentes fra
 supplerende eksport eller pålitelig referansekartlegging før slike oppslag.
 
-Geirs FGFR1/MET-par bevares som oppgitte startregler:
+FGFR1/MET-parene er korrigert etter kontroll av eksporttranskriptenes genkobling:
 
-- FGFR1: NM_001127500.3 → NM_023110.3.
-- MET: NM_001174067.1 → NM_000245.4.
+- FGFR1: NM_001174067.1 → NM_023110.3.
+- MET: NM_001127500.3 → NM_000245.4.
+
+Oppdatert 10. oktober 2026: eksporttranskriptene var byttet mellom genene i
+opprinnelig e-post. Genkoblingen er kontrollert mot NCBI RefSeq.
 
 Dette er ikke bare tekstutskifting av NM-nummer: varianten må kartlegges til
 genomisk referanse og så til måltranskriptet. Begge uttrykk beholdes med sporbarhet.
