@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.1 — 13 October 2026
+
+- Keep Genotype when an Ion Reporter export has a present but empty Call cell.
+  Preserve both original columns and explicit PRESENT, ABSENT and NO CALL states.
+- When Mutalyzer rejects intronic HGVS on an mRNA reference, retain that error
+  and offer a separate genomic hg19 candidate only if the supplied alleles and
+  returned chromosome/transcript context agree. Candidates require manual review.
+- Trim redundant shared VCF bases at the browser-query boundary, retaining indel
+  anchors and the original source identity. Equivalent padded SNVs no longer
+  produce false identity conflicts or missed exact genomic searches.
+- Verify twelve additional raw TSV exports individually through the app import
+  flow, preserving all 76 rows and detecting both row-level coverage failures.
+
 ## 0.5.0 — 10 October 2026
 
 - Reduce Excel to four visible worksheets: compact Overview, all-row Quality,

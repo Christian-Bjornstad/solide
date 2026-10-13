@@ -1,9 +1,10 @@
-# Verification — Solide v0.5.0
+# Verification — Solide v0.5.1
 
-Dates: 9–10 October 2026. Local Windows / Python 3.12.
+Dates: 9–13 October 2026. Local Windows / Python 3.12.
 
 ## Automated and runtime checks
 
+- v0.5.1: **348 tests passed** in 23.87 seconds; compileall passed.
 - v0.5.0: `python -m pytest -q` passed **304 tests** in 21.86 seconds; compileall
   passed. Publishable paths and Git history contained no input/report files,
   private identifiers or keys. Saved passwords remain in the Windows vault.
@@ -202,6 +203,53 @@ genomic and full versioned HGVS searches. ENIGMA assertions, exact identity and
 dataset release were retained. The actual selected rows contain no BRCA1/2
 variant, so these are reference tests rather than patient BRCA results.
 [Official BRCA Exchange API](https://brcaexchange.org/about/api).
+
+## Additional raw TSV validation — 13 October 2026
+
+A new delivery archive was inspected recursively without executing attachments.
+It contained seven Ion Reporter TSVs (69 rows) and five nested Genexus/OPA TSVs
+(seven rows). Each of the twelve original TSVs was imported separately through
+the production GUI. All 76 physical source rows, their original 62/63/25-column
+schemas, sample separation and file hashes were independently verified. The
+archive contains 70 sequence rows and six CNV rows; it contains no RNA assay rows.
+Seven Ion exports declare hg19 and upstream filtering. The five OPA exports lack
+sample/transcript/reference metadata; technical validation uses separate dataset
+aliases and the user's prior explicit hg19 instruction, without inventing a
+clinical patient association. Clinical assessments remain blank and Pending.
+
+Two Ion formats have an empty Call column but populated Genotype. A reproduced
+importer defect discarded the genotype in 38 sequence rows; the fix retains the
+first nonempty Call/Genotype while preserving both original cells. Explicit
+ABSENT, NO CALL and PRESENT precedence is covered by regression tests. These
+negative/no-call values are not present in this new archive; earlier all-row
+Genexus checks cover actual RNA ABSENT/NO CALL cases. Ion rows still require
+manual selection; selecting all 70 sequence rows here is a technical test choice.
+
+Fresh public-service checks used actual variants: seven successful transcript or
+genomic Mutalyzer normalizations plus one PTEN intronic genomic candidate; one
+verified PTEN SpliceAI result; and two verified BRCA Exchange matches. BRCA
+source classifications remain separate from app assessments. PTEN's original
+EINTRONIC error is retained alongside the confirmed hg19 genomic suggestion.
+No transcript, allele or nomenclature approval was invented.
+
+A fresh authenticated Edge batch recorded 14 source outcomes across two input
+datasets, including two complete MTBP reports and current provider screenshots.
+An OPA EGFR record describes a padded CT-to-CG change. Strict matching rejected
+the database's equivalent T-to-G description one base downstream. The query
+boundary now trims shared padding without shifting repeats or removing indel
+anchors. Rerunning the two affected ClinVar/Franklin results returned a Verified
+match and Review match respectively; both previous outcomes remain in history.
+Source fields and fingerprints were unchanged. MTBP cleanup was verified after
+both reports, and an independent portal visit confirmed zero remaining reports.
+
+Twelve actual Excel exports passed independent source/session/workbook checks:
+76 unchanged raw rows, 70 selected technical review candidates, both Failed
+row-coverage flags, 25 current source results, 537 valid internal links and 49
+pixel-exact image segments. Two full MTBP reports are embedded once each. Every
+workbook retains four visible worksheets and the hidden Searches audit. Unsearched
+rows remain explicitly Not run. Current image provenance, source-file separation,
+first/middle/last links and final image print boundaries passed. Actual source
+files, sessions, provider responses, captures and workbooks remain Git-ignored.
 
 ## Work-PC pilot remains
 

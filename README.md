@@ -39,6 +39,9 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 ## Workflow
 
 1. **Workspace** imports TSV or Genexus XLSX; confirm patient / sample ID and assembly.
+   For the normal workflow, import one original TSV, review/select its rows,
+   run the chosen sources and export its Excel report. Extract delivery ZIPs
+   locally first; nested folders are packaging rather than an assay format.
 2. Switch the workspace view to **Quality** to check every imported row, including unselected rows.
 3. **Variants** lets you filter, select and review variant identity. **Assess variant**
    saves classification, report decision, reviewer and assessment notes in the app.
@@ -122,6 +125,10 @@ Mutalyzer returns suggestions for manual approval in **Identity review**.
 When no transcript is available, explicit confirmed GRCh37 REF/ALT can provide
 a genomic normalization query. A failed optional MANE mapping retains the
 normalization and records its limitation.
+For intronic HGVS on an mRNA reference, Mutalyzer may report EINTRONIC because
+the reference lacks intronic sequence. If its returned GRCh37 chromosome context
+agrees with the source's explicit alleles, the app records a separate genomic
+candidate. The original error and descriptions remain available for review.
 Corrected HGVS never silently reuses original genomic alleles. Enter matching
 reviewed hg19 `chr-pos-REF-ALT` when a genomic lookup is needed after correction.
 
@@ -201,6 +208,9 @@ as variants. ZIP archives were inspected as design references; extract an origin
 TSV/XLSX export locally before importing. Duplicate columns or competing variant
 tables are rejected rather than silently overwriting or duplicating records.
 Workbooks exported by Solide are report snapshots and are not import sources.
+An empty Call cell falls back to a populated Genotype without altering either
+source column. Explicit calls take precedence. Ion genotype strings do not
+automatically select rows for search; use the Workspace checkboxes.
 
 Text is written safely as text, including original values starting with formula
 characters. Excel's cell limit still applies; the session retains full source
