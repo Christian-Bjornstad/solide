@@ -158,7 +158,7 @@ def load_file(path: Path) -> ImportResult:
             raw['_sheet'] = sheet_name
             raw['_columns'] = headers
             raw['_values'] = list(row[:len(headers)]) + [None]*max(0,len(headers)-len(row))
-            call = text(get('Call', 'Genotype'))
+            call = text(get('Call')) or text(get('Genotype'))
             variants.append(Variant(
                 id=hashlib.sha256(f'{digest}:{sheet_name}:{index}'.encode()).hexdigest()[:24],
                 gene=text(get('Genes', 'Gene')), transcript=text(get('Transcript', 'Gene Isoform')),

@@ -156,3 +156,22 @@ def test_source_without_scope_metadata_does_not_claim_complete_export(tmp_path):
 
     assert '_export_scope' not in result.variants[0].raw
     assert not any(value.startswith('Filtered export:') for value in result.warnings)
+
+
+def test_empty_call_uses_source_genotype_without_changing_original_cells(tmp_path):
+    path=tmp_path/'source.tsv'
+    path.write_text('Transcript\tGenes\tType\tCall\tGenotype\nNM_000546.6\tTP53\tSNV\t\tC/T\n',encoding='utf8')
+    v=load_file(path).variants[0]
+    assert v.call=='C/T'
+    assert v.raw['Call']=='' and v.raw['Genotype']=='C/T'
+    assert v.raw['_values'][3:]==['','C/T']
+    assert not v.selected
+
+
+@pytest.mark.parametrize('call',['ABSENT','NO CALL','PRESENT (HETEROZYGOUS)'])
+def test_explicit_call_takes_precedence_over_genotype(tmp_path,call):
+    path=tmp_path/'source.tsv'
+    path.write_text(f'Type\tGene\tCall\tGenotype\nSNV\tTP53\t{call}\tC/T\n',encoding='utf8')
+    v=load_file(path).variants[0]
+    assert v.call==call
+    assert v.selected==call.startswith('PRESENT')
