@@ -150,6 +150,20 @@ def test_mutalyzer_validation_and_mapping_issues_remain_reviewable(monkeypatch,t
     assert not assess_evidence(v,evidence,session).retryable
 
 
+def test_mutalyzer_intronic_candidate_is_visible_but_not_approved(monkeypatch,tmp_path):
+    import solide.evidence as module
+    v=Variant(patient='SOURCE',gene='PTEN',transcript='NM_000314.8',coding='c.254-1G>A',selected=True)
+    session=Session(variants=[v])
+    monkeypatch.setattr(module,'normalize_variant',lambda v:{'normalization':{'errors':[
+        {'code':'EINTRONIC','details':'mRNA lacks intronic sequence'}]},'genomic_normalization':{
+            'normalization':{'normalized_description':'NC_000010.10:g.89692769G>A'}}})
+    module.run_queue(session,['Mutalyzer'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan={(v.id,'Mutalyzer')})
+    evidence=v.evidence['Mutalyzer']
+    assert evidence['status']=='needs_review'
+    assert 'EINTRONIC' in evidence['summary'] and 'GRCh37 genomic candidate (review required): NC_000010.10:g.89692769G>A' in evidence['summary']
+    assert not v.nomenclature_verified and not v.corrected_hgvs and v.coding=='c.254-1G>A'
+
+
 def test_spliceai_match_requires_complete_hg19_response():
     v=Variant(patient='SOURCE',gene='TP53',locus='chr17:7577609',ref='C',alt='T',assembly='GRCh37',selected=True)
     score={**{key:'0.0' for key in ('DS_AG','DS_AL','DS_DG','DS_DL')},

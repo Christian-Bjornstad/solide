@@ -120,3 +120,77 @@ def test_mtbp_retry_regenerates_complete_selected_patient_batch(monkeypatch,tmp_
         'mtbp_batch':module.batch_fingerprint(s,'DEMO'),'raw':{'screenshots':[{'path':str(image)}],'patient_report_screenshot':str(image)}}
     run_queue(s,['MTBP'],tmp_path,module.QueueControl(),lambda *args:None,lambda msg:None)
     assert len(calls[0])==2
+
+
+@pytest.mark.parametrize('source', ['ClinVar', 'Franklin', 'MTBP'])
+def test_padded_snv_queries_use_minimal_alleles_without_changing_source(source):
+    from dataclasses import asdict
+    v=Variant(patient='SOURCE',gene='EGFR',coding='c.2573T>G',protein='p.L858R',
+        locus='chr7:55259514',ref='CT',alt='CG',assembly='GRCh37',
+        raw={'Locus':'chr7:55259514','Ref':'CT','Alt':'CG'})
+    original=asdict(v);fingerprint=v.fingerprint('Other')
+
+    record=query_record(v,source)
+
+    assert (record.genomic_location,record.ref_allele,record.alt_allele)==('chr7:55259515','T','G')
+    assert asdict(v)==original and v.fingerprint('Other')==fingerprint
+    assert genomic_query(v)=='chr7-55259514-CT-CG'
+
+
+@pytest.mark.parametrize('position,ref,alt,expected', [
+    (100,'ACG','ATG',('chr7:101','C','T')),
+    (100,'ACT','AT',('chr7:100','AC','A')),
+    (100,'ACT','ACGT',('chr7:101','C','CG')),
+    (100,'CAAAA','C',('chr7:100','CAAAA','C')),
+    (100,'T','TGGGT',('chr7:100','T','TGGGT')),
+])
+def test_query_trimming_preserves_indel_anchors_and_does_not_shift_repeats(position,ref,alt,expected):
+    record=query_record(Variant(gene='EGFR',locus=f'chr7:{position}',ref=ref,alt=alt,assembly='GRCh37'))
+    assert (record.genomic_location,record.ref_allele,record.alt_allele)==expected
+
+
+def test_equivalent_padding_has_one_query_key_but_different_alleles_remain_distinct():
+    variants=[Variant(patient='SOURCE',gene='EGFR',assembly='GRCh37',locus=locus,ref=ref,alt=alt)
+              for locus,ref,alt in [('chr7:100','CT','CG'),('chr7:101','T','G'),('chr7:101','T','A')]]
+    records=[query_record(v,'Franklin') for v in variants]
+    keys=[BrowserReviewService.variant_key(record) for record in records]
+    assert keys[0]==keys[1] and keys[1]!=keys[2]
+    assert len({v.id for v in variants})==3
+
+
+def test_minimal_query_satisfies_strict_returned_identity_without_accepting_other_alleles():
+    from solide._vendor.archer.services.browser_review import parse_franklin_page
+    v=Variant(patient='SOURCE',gene='EGFR',coding='c.2573T>G',protein='p.L858R',
+        locus='chr7:55259514',ref='CT',alt='CG',assembly='GRCh37')
+    record=query_record(v,'Franklin')
+    url='https://franklin.genoox.com/clinical-db/variant/example'
+    matching=parse_franklin_page('EGFR\nchr7-55259515 T>G\nSuggested classification\nPathogenic',record,url)
+    mismatch=parse_franklin_page('EGFR\nchr7-55259515 T>A\nSuggested classification\nPathogenic',record,url)
+    assert matching.status=='found'
+    assert matching.raw['identity_verification']['requested']==matching.raw['identity_verification']['returned']
+    assert mismatch.status=='identity_mismatch' and not mismatch.clinical_significance
+
+
+def test_approved_controlled_genomic_is_trimmed_without_using_superseded_source():
+    v=Variant(gene='EGFR',locus='chr7:999',ref='A',alt='C',assembly='GRCh37',
+        corrected_hgvs='NM_005228.5:c.2573T>G',controlled_genomic='chr7-55259514-CT-CG',nomenclature_verified=True)
+    record=query_record(v,'ClinVar')
+    assert (record.genomic_location,record.ref_allele,record.alt_allele)==('chr7:55259515','T','G')
+    assert record.hgvsc==v.corrected_hgvs
+    assert v.locus=='chr7:999' and v.controlled_genomic=='chr7-55259514-CT-CG'
+
+
+def test_unapproved_controlled_genomic_cannot_be_trimmed_into_an_accepted_query():
+    v=Variant(gene='EGFR',locus='chr7:100',ref='CT',alt='CG',assembly='GRCh37',
+              controlled_genomic='chr7-100-CT-CG')
+    with pytest.raises(ValueError,match='Approve'):
+        query_record(v,'ClinVar')
+
+
+@pytest.mark.parametrize('changes',[dict(locus='chr0:100'),dict(locus='chr7:0'),
+    dict(ref='CN'),dict(alt='CT'),dict(assembly='Unknown')])
+def test_invalid_genomic_inputs_do_not_become_minimal_variant_queries(changes):
+    fields=dict(gene='EGFR',locus='chr7:100',ref='CT',alt='CG',assembly='GRCh37')
+    fields.update(changes)
+    with pytest.raises(ValueError):
+        query_record(Variant(**fields),'ClinVar')

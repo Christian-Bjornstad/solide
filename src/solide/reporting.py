@@ -124,9 +124,12 @@ def service_fields(source,data):
            'gene_cdna':'Gene / cDNA','gene_protein_or_identifier':'Gene / protein or identifier'}.get(data.get('query_basis'))
     fields=[('Query basis',basis)]
     if source=='Mutalyzer':
+        candidate=data.get('genomic_normalization',{})
         fields.extend([('Requested HGVS',data.get('original')),('Normalized HGVS',data.get('normalization',{}).get('normalized_description')),
             ('Target transcript',data.get('mane_target')),('Mapped HGVS',data.get('mapping',{}).get('mapped_description')),
-            ('Mapping limitation',data.get('mapping_issue'))])
+            ('Mapping limitation',data.get('mapping_issue')),('Genomic query',candidate.get('original')),
+            ('Genomic candidate',candidate.get('normalization',{}).get('normalized_description')),
+            ('Candidate status','Review required' if candidate else data.get('genomic_normalization_issue'))])
     elif source=='SpliceAI':
         fields.extend([('Requested allele',data.get('query')),('Scored allele',data.get('scored_variant')),
             ('Prediction settings',f"GRCh{data['hg']}; distance={data['distance']}; mask={data['mask']}"

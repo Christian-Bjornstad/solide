@@ -11,7 +11,7 @@ from functools import lru_cache
 from PIL.Image import DecompressionBombError
 from .models import Variant, Session
 from .quality import review_reasons, MANE_TARGETS
-from .nomenclature import hgvs_query, genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
+from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
 from .brca_exchange import brca_exchange_variant
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
@@ -153,8 +153,8 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
     locus,ref,alt=v.locus,v.ref,v.alt
     if v.corrected_hgvs:
         locus,ref,alt='','',''
-    if v.controlled_genomic:
-        chrom,pos,ref,alt=genomic_query(v).split('-')
+    if v.controlled_genomic or (not v.corrected_hgvs and locus and ref and alt):
+        chrom,pos,ref,alt=minimal_genomic_query(v).split('-')
         locus=f'{chrom}:{pos}'
     # No local filenames, sample IDs, raw worksheet fields or comments sent downstream.
     pseudonym = 'S' + hashlib.sha256(v.patient.encode()).hexdigest()[:16]
@@ -245,6 +245,11 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             summary += '\nMANE suggestion: ' + str(data['mapping'].get('mapped_description',data['mapping']))
                         if data.get('mapping_issue'):
                             summary += '\n' + data['mapping_issue']
+                        candidate=data.get('genomic_normalization',{}).get('normalization',{}).get('normalized_description')
+                        if candidate:
+                            summary += '\nGRCh37 genomic candidate (review required): ' + candidate
+                        if data.get('genomic_normalization_issue'):
+                            summary += '\n' + data['genomic_normalization_issue']
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'})
                     elif source == 'BRCA Exchange':

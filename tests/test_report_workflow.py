@@ -129,3 +129,17 @@ def test_api_source_release_and_normalization_are_readable_without_setting_app_c
     assert fields['Normalized HGVS']=='NM_007294.4:c.68_69del'
     assert fields['Source classification']=='Source assertion'
     assert w['Overview']['F6'].value=='Laboratory assessment'
+
+
+def test_intronic_genomic_candidate_remains_a_separate_review_field(tmp_path):
+    v=Variant(patient='SOURCE',gene='PTEN',selected=True)
+    v.evidence['Mutalyzer']={'database':'Mutalyzer','status':'needs_review','fingerprint':v.fingerprint('Other'),
+        'raw':{'original':'NM_000314.8:c.254-1G>A','normalization':{'errors':[{'code':'EINTRONIC'}]},
+            'genomic_normalization':{'original':'NC_000010.10:g.89692769G>A',
+                'normalization':{'normalized_description':'NC_000010.10:g.89692769G>A'}}}}
+    w=load_workbook(export_patient(Session(variants=[v]),'SOURCE',tmp_path))
+    fields={row[0].value:row[1].value for row in w['Evidence'] if row[0].value}
+    assert fields['Requested HGVS']=='NM_000314.8:c.254-1G>A'
+    assert fields['Genomic candidate']=='NC_000010.10:g.89692769G>A'
+    assert fields['Candidate status']=='Review required'
+    assert fields['Identity review']=='Not approved'

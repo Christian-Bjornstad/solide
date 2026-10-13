@@ -123,6 +123,105 @@ def test_mutalyzer_http_failure_without_validation_details_remains_a_transport_f
         normalize_variant(Variant(transcript='NM_007294.4', coding='c.68_69del'), http=http)
 
 
+def intronic_input(**changes):
+    fields = dict(gene='PTEN', transcript='NM_000314.8', coding='c.254-1G>A',
+        locus='chr10:89692769', ref='G', alt='A', assembly='GRCh37')
+    fields.update(changes)
+    return Variant(**fields)
+
+
+def intronic_error(**changes):
+    error = dict(code='EINTRONIC', details='mRNA reference does not contain introns.',
+        assemblies={'GRCh37': {'NM_000314.8': {'chr_id':'NC_000010.10'}}})
+    result = dict(input_description='NM_000314.8:c.254-1G>A', errors=[error])
+    result.update(changes)
+    return result
+
+
+def genomic_candidate(**changes):
+    result = dict(input_description='NC_000010.10:g.89692769G>A',
+        normalized_description='NC_000010.10:g.89692769G>A',
+        equivalent_descriptions={'c':[{'description':'NC_000010.10(NM_000314.8):c.254-1G>A'}]})
+    result.update(changes)
+    return result
+
+
+def test_intronic_mrna_error_retains_original_and_separate_exact_hg19_candidate():
+    http = Mock()
+    original = intronic_error()
+    candidate = genomic_candidate()
+    http.get.side_effect = [response(dict(custom=original), 422), response(candidate)]
+    variant = intronic_input(patient='PRIVATE-ID', source_file='private.tsv', comment='private note')
+    result = normalize_variant(variant, http=http)
+    assert result['normalization'] == original
+    assert result['genomic_normalization'] == dict(original='NC_000010.10:g.89692769G>A',
+        query_basis='genomic_grch37', normalization=candidate)
+    assert not variant.nomenclature_verified and not variant.corrected_hgvs
+    assert variant.transcript == 'NM_000314.8' and variant.coding == 'c.254-1G>A'
+    assert all(value not in str(http.get.call_args_list) for value in ['PRIVATE-ID','private.tsv','private note'])
+
+
+@pytest.mark.parametrize('changes', [dict(ref='', alt=''), dict(assembly='Unknown'),
+    dict(locus='chr17:89692769'), dict(corrected_hgvs='NM_000314.8:c.254-1G>A'),
+    dict(controlled_genomic='chr10-89692769-G-A', nomenclature_verified=True)])
+def test_intronic_fallback_never_uses_missing_conflicting_or_superseded_original_alleles(changes):
+    http = Mock()
+    http.get.return_value = response(dict(custom=intronic_error()), 422)
+    result = normalize_variant(intronic_input(**changes), http=http)
+    assert result['normalization']['errors']
+    assert 'genomic_normalization' not in result
+    http.get.assert_called_once()
+
+
+@pytest.mark.parametrize('errors', [[dict(code='ESEQUENCEMISMATCH')],
+    [dict(code='EINTRONIC'),dict(code='ESEQUENCEMISMATCH')]])
+def test_other_validation_errors_never_trigger_genomic_fallback(errors):
+    http = Mock()
+    http.get.return_value = response(dict(custom=intronic_error(errors=errors)), 422)
+    result = normalize_variant(intronic_input(), http=http)
+    assert 'genomic_normalization' not in result
+    http.get.assert_called_once()
+
+
+@pytest.mark.parametrize('assemblies', [None, [], {'GRCh37':None}, {'GRCh37':[]},
+    {'GRCh37':{'NM_000314.8':{'chr_id':'NC_000010.11'}}}])
+def test_missing_or_malformed_hg19_transcript_context_keeps_original_error(assemblies):
+    http = Mock()
+    original = intronic_error(errors=[dict(code='EINTRONIC',assemblies=assemblies)])
+    http.get.return_value = response(dict(custom=original), 422)
+    result = normalize_variant(intronic_input(), http=http)
+    assert result['normalization'] == original
+    assert 'genomic_normalization' not in result
+    http.get.assert_called_once()
+
+
+@pytest.mark.parametrize('candidate', [genomic_candidate(errors=[dict(code='ESEQUENCEMISMATCH')]),
+    genomic_candidate(normalized_description='NC_000010.11:g.89692769G>A'),
+    genomic_candidate(input_description='NC_000010.10:g.1G>A'),
+    genomic_candidate(input_description=None),
+    genomic_candidate(equivalent_descriptions={'c':[{'description':'NC_000010.10(NM_000314.8):c.254-1G>T'}]}),
+    genomic_candidate(equivalent_descriptions=[]), genomic_candidate(equivalent_descriptions={'c':'unavailable'})])
+def test_genomic_fallback_failure_or_known_cdna_conflict_cannot_be_offered(candidate):
+    http = Mock()
+    original = intronic_error()
+    http.get.side_effect = [response(dict(custom=original), 422), response(candidate)]
+    result = normalize_variant(intronic_input(), http=http)
+    assert result['normalization'] == original
+    assert 'genomic_normalization' not in result
+    assert result['genomic_normalization_issue']
+
+
+def test_genomic_fallback_network_failure_retains_the_original_review_details():
+    http = Mock()
+    original = intronic_error()
+    http.get.side_effect = [response(dict(custom=original), 422), requests.Timeout('private note')]
+    result = normalize_variant(intronic_input(), http=http)
+    assert result['normalization'] == original
+    assert 'genomic_normalization' not in result
+    assert 'Timeout' in result['genomic_normalization_issue']
+    assert 'private note' not in str(result)
+
+
 @pytest.mark.parametrize('gene,original,target,mapped', [
     ('FGFR1', 'NM_001174067.1', 'NM_023110.3', 'NM_023110.3:c.1862A>C'),
     ('MET', 'NM_001127500.3', 'NM_000245.4', 'NM_000245.4:c.3682G>A')])

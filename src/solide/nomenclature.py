@@ -59,16 +59,19 @@ def genomic_query(v: Variant) -> str:
     return f'chr{match[1].upper()}-{match[2]}-{v.ref.upper()}-{v.alt.upper()}'
 
 
+def _genomic_normalization_query(v: Variant) -> str:
+    chrom, pos, ref, alt = genomic_query(v).removeprefix('chr').split('-')
+    genomic_hgvs = format_mtbp_grch37(f'chr{chrom}:{pos}', ref, alt)
+    if not genomic_hgvs:
+        raise ValueError('Cannot construct HGVS from the supplied GRCh37 alleles.')
+    return _GRCH37_REFERENCES[chrom] + ':' + genomic_hgvs.split(':', 1)[1]
+
+
 def _normalization_query(v: Variant) -> tuple[str, str]:
     try:
         description = hgvs_query(v)
     except ValueError:
-        chrom, pos, ref, alt = genomic_query(v).removeprefix('chr').split('-')
-        genomic_hgvs = format_mtbp_grch37(f'chr{chrom}:{pos}', ref, alt)
-        if not genomic_hgvs:
-            raise ValueError('Cannot construct HGVS from the supplied GRCh37 alleles.')
-        description = _GRCH37_REFERENCES[chrom] + ':' + genomic_hgvs.split(':', 1)[1]
-        return description, 'genomic_grch37'
+        return _genomic_normalization_query(v), 'genomic_grch37'
     if len(description) > 500 or not _FULL_HGVS.fullmatch(description):
         raise ValueError('Enter one complete, versioned nucleotide HGVS description for review.')
     return description, 'full_hgvs'
@@ -106,31 +109,84 @@ def _map_normalization(http, result: dict, target: str) -> None:
         result['mapping_issue'] = f'MANE mapping unavailable ({reason}). Review the target transcript manually.'
 
 
+def _normalize_description(http, description: str, basis: str) -> dict:
+    # Current API schema: https://mutalyzer.nl/api/swagger.json
+    response = http.get('https://mutalyzer.nl/api/normalize/' + quote(description, safe=''), timeout=45)
+    if response.status_code != 422:
+        response.raise_for_status()
+    data = response.json()
+    # Validation rejections use HTTP 422 and put the normalizer output in
+    # custom. They are useful review evidence, not a lost network response.
+    if response.status_code == 422:
+        custom = data.get('custom') if isinstance(data, dict) else None
+        if not isinstance(custom, dict) or not custom.get('errors'):
+            response.raise_for_status()
+        data = custom
+    if not isinstance(data, dict) or not (data.get('normalized_description') or data.get('errors')):
+        raise ValueError('Mutalyzer returned no normalization or error details.')
+    if data.get('input_description') and data['input_description'] != description:
+        raise ValueError('Mutalyzer did not confirm the requested HGVS description.')
+    result = {'original': description, 'query_basis': basis, 'normalization': data}
+    if response.status_code == 422:
+        result['normalization_http_status'] = 422
+    return result
+
+
+def _intronic_genomic_candidate(v: Variant, http, result: dict) -> None:
+    errors = result['normalization'].get('errors')
+    if (not isinstance(errors, list) or not errors
+            or any(not isinstance(error, dict) or error.get('code') != 'EINTRONIC' for error in errors)
+            or v.corrected_hgvs or v.controlled_genomic):
+        return
+    try:
+        description = _genomic_normalization_query(v)
+    except ValueError:
+        return
+    reference, _ = description.split(':', 1)
+    transcript, coding = result['original'].split(':', 1)
+    # Mutalyzer's EINTRONIC response gives explicit assembly/transcript context.
+    # Require that hg19 context to agree with the source chromosome; no accession
+    # or assembly is inferred from gene names. Both requests retain their input.
+    for error in errors:
+        assemblies = error.get('assemblies')
+        grch37 = assemblies.get('GRCh37') if isinstance(assemblies, dict) else None
+        context = grch37.get(transcript) if isinstance(grch37, dict) else None
+        if not isinstance(context, dict) or context.get('chr_id') != reference:
+            return
+    try:
+        candidate = _normalize_description(http, description, 'genomic_grch37')
+        normalized = candidate['normalization']
+        if (normalized.get('errors') or normalized.get('input_description') != description
+                or not isinstance(normalized.get('normalized_description'), str)
+                or not normalized['normalized_description'].startswith(reference + ':g.')):
+            raise ValueError('Genomic response did not confirm the GRCh37 reference.')
+        equivalents = normalized.get('equivalent_descriptions', {})
+        descriptions = equivalents.get('c', []) if isinstance(equivalents, dict) else None
+        if not isinstance(descriptions, list):
+            raise ValueError('Genomic response returned malformed transcript equivalents.')
+        prefix = f'{reference}({transcript}):'
+        if any(isinstance(item, dict) and isinstance(item.get('description'), str)
+               and item['description'].startswith(prefix) and item['description'] != prefix + coding
+               for item in descriptions):
+            raise ValueError('Genomic response conflicts with the original versioned transcript.')
+        # Keep the original EINTRONIC error. This separate candidate remains a
+        # suggestion for review and never marks nomenclature as accepted.
+        result['genomic_normalization'] = candidate
+    except (requests.RequestException, ValueError) as exc:
+        result['genomic_normalization_issue'] = (
+            f'GRCh37 genomic candidate unavailable ({type(exc).__name__}). '
+            'Review the original transcript and genomic alleles.')
+
+
 def normalize_variant(v: Variant, http=None) -> dict:
     description, basis = _normalization_query(v)
     owned_session = http is None
     if owned_session:
         http = system_trust_session()
     try:
-        # Current API schema: https://mutalyzer.nl/api/swagger.json
-        response = http.get('https://mutalyzer.nl/api/normalize/' + quote(description, safe=''), timeout=45)
-        if response.status_code != 422:
-            response.raise_for_status()
-        data = response.json()
-        # Validation rejections use HTTP 422 and put the normalizer output in
-        # custom. They are useful review evidence, not a lost network response.
-        if response.status_code == 422:
-            custom = data.get('custom') if isinstance(data, dict) else None
-            if not isinstance(custom, dict) or not custom.get('errors'):
-                response.raise_for_status()
-            data = custom
-        if not isinstance(data, dict) or not (data.get('normalized_description') or data.get('errors')):
-            raise ValueError('Mutalyzer returned no normalization or error details.')
-        if data.get('input_description') and data['input_description'] != description:
-            raise ValueError('Mutalyzer did not confirm the requested HGVS description.')
-        result = {'original': description, 'query_basis': basis, 'normalization': data}
-        if response.status_code == 422:
-            result['normalization_http_status'] = 422
+        result = _normalize_description(http, description, basis)
+        data = result['normalization']
+        _intronic_genomic_candidate(v, http, result)
         target = MANE_TARGETS.get(v.gene)
         if target and target[0] in v.transcript and not data.get('errors'):
             _map_normalization(http, result, target[1])
@@ -148,6 +204,16 @@ def _trim_spliceai_alleles(pos: int, ref: str, alt: str) -> tuple[int, str, str]
     while len(ref) > 1 and len(alt) > 1 and ref[0] == alt[0]:
         pos, ref, alt = pos + 1, ref[1:], alt[1:]
     return pos, ref, alt
+
+
+def minimal_genomic_query(v: Variant) -> str:
+    """Trim shared VCF padding while retaining indel anchors and source identity.
+
+    This does not left-align repeats or overwrite the imported/reviewed allele.
+    """
+    chrom, pos, ref, alt = genomic_query(v).split('-')
+    pos, ref, alt = _trim_spliceai_alleles(int(pos), ref, alt)
+    return f'{chrom}-{pos}-{ref}-{alt}'
 
 
 def validate_spliceai_response(data: dict, variant: str) -> str:
