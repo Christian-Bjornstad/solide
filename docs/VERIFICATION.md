@@ -1,6 +1,41 @@
-# Verification — Solide v0.5.1
+# Verification — Solide v0.6.0
 
-Dates: 9–13 October 2026. Local Windows / Python 3.12.
+Dates: 9–14 October 2026. Local Windows / Python 3.12.
+
+## Analysis reports — 14 October 2026
+
+- **418 tests passed** in 30.54 seconds; compileall and diff checks passed.
+  New checks cover source/analysis isolation even with shared sample IDs,
+  schema migration, selection/tissue/rerun scope, full response retention,
+  rejected capture identities and paired export failure recovery.
+- The actual GUI imported the twelve raw TSVs individually again: twelve
+  independent analyses, all 76 rows, 70 sequence candidates, six CNV rows,
+  both row-level coverage failures and all source hashes retained.
+- Generated twelve compact reports and seven separate evidence attachments,
+  plus a complete OPA report retaining another 3,204 source rows. Independent
+  audit verified all **3,280 report raw rows**, every laboratory QC exception,
+  source metadata and literal API-response round trips.
+- **48 embedded image segments** match the analysis's current original pixels;
+  MTBP display crops preserve original PNGs. **83 local links** resolve to the
+  correct evidence or workbook target. Main reports contain no images.
+- Read-only artifact rendering produced 83 view ranges across report and
+  attachment roles. Actual OPA/Ion findings, full OPA CNV/RNA exceptions, filtered
+  export warnings, source ledgers, VPM-style captures and API evidence were
+  visually checked. Fixed clipped assay metadata and identity-check descriptions;
+  complete machine metadata remains available in hidden literal storage.
+- At 1050×700 with 18 px text, duplicate workspace spacing/counts are removed;
+  detail tabs and assessment actions remain below the visible variant rows.
+- Two independent authenticated MTBP batches completed six variant results:
+  five Review matches and one No match. Every capture path is in its own analysis
+  folder; every remote report was deleted. A separate authenticated portal check
+  confirmed **zero reports**. Other 13 October source captures retain their real
+  capture dates; they were not relabeled as newly captured.
+- Actual records still have blank laboratory classifications and Pending decisions.
+  No clinical assessment was invented. Migrated source sessions preserve their
+  original rows, clinical fields, IDs and evidence, and originals stay unchanged.
+- Independent code and visual reviews reproduced and verified fixes for missing
+  RNA status, rejected-identity captures, long API JSON and corrected HGVS labels.
+  Public previews contain synthetic data only; actual material stays Git-ignored.
 
 ## Automated and runtime checks
 

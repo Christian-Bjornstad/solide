@@ -1,10 +1,20 @@
 # Archer reuse
 
+The v0.6.0 Excel attachment design was checked against VPM (the Archer app) on
+14 October 2026: branch `feat/workstation-improvements-2026-10-07`, revision
+`b5f50c6e031ad9cfe8374e99d7e47b92c22872d1`,
+[`reports/patient_excel.py`](https://github.com/Christian-Bjornstad/Archer-prosess/blob/b5f50c6e031ad9cfe8374e99d7e47b92c22872d1/src/archer_processor/reports/patient_excel.py).
+Reused concepts are the separate evidence attachment, per-variant source order,
+one combined MTBP capture, geometry-based display cropping and atomic save.
+Solide retains complete source pixels, splits tall captures, keeps assessments
+in the app and uses separate OPA/Ion analysis boundaries. Excel assessment
+readback and Archer's clinical exclusion rules were not copied.
+
 Pinned source: https://github.com/Christian-Bjornstad/Archer-prosess
 Revision: 4fda67a43d8002fb2928d60211327b73943967fd
 
 Focused follow-up source: branch `feat/workstation-improvements-2026-10-07`,
-revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9–10 October 2026.
+revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9â€“10 October 2026.
 Upstream `main` still points at the base revision above. This is a selective
 port from the later branch, not a replacement of the vendor tree.
 

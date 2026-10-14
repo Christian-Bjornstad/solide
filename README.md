@@ -2,7 +2,8 @@
 
 Local Windows desktop app for solid tumour variant review. Import Ion Reporter
 and Genexus exports, review row-level quality, select variants, collect database
-evidence through Edge, and export one Excel workbook per patient.
+evidence through Edge, and export an Excel report with a separate evidence
+attachment for each analysis.
 
 ![Solide workspace with synthetic data](docs/images/solide.png)
 
@@ -38,7 +39,8 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 
 ## Workflow
 
-1. **Workspace** imports TSV or Genexus XLSX; confirm patient / sample ID and assembly.
+1. **Workspace** imports TSV or Genexus XLSX; confirm sample ID, assembly, report
+   type (**OPA** or **Ion Torrent**) and assay (for example Childhood or BRCA/HRR).
    For the normal workflow, import one original TSV, review/select its rows,
    run the chosen sources and export its Excel report. Extract delivery ZIPs
    locally first; nested folders are packaging rather than an assay format.
@@ -47,7 +49,22 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
    saves classification, report decision, reviewer and assessment notes in the app.
 4. **Searches** selects databases and MTBP tissue (default **Other**). Save the
    session, sign in through Settings where needed, then run searches.
-5. Review source status and screenshots before exporting **Reports**.
+5. Review source status and screenshots before exporting **Reports**. Export
+   creates the active analysis's report and, when evidence is available, a separate
+   Excel attachment. Clear **Include Excel attachment** for the compact report alone.
+
+The **Analysis** selector applies across the app. Separate source files remain
+separate analyses even when their sample IDs match. Selection, quality, searches,
+tissue and exports use the active analysis. Older sessions retain their rows and
+assessments; confirm any **Unassigned** report type in **Analysis details** before export.
+Importing the same file again with the same sample, profile and assay reopens its
+existing analysis without discarding assessments or duplicating rows.
+
+The main workbook contains **Findings**, **Quality** and **Sources**. Complete
+original rows are retained in hidden **Raw data** (right-click a worksheet tab and
+choose Unhide). The attachment has an index, variant evidence sheets in VPM source
+order, and one copy of each combined MTBP report. Images stay out of the main
+report. [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
 
 Sessions preserve source data, app assessments, reviewed HGVS and search history locally.
 Assessment is performed in the app. Excel is a versioned snapshot; edits to an
@@ -81,7 +98,7 @@ completed jobs.
 - **Rerun… → Selected results**: highlighted result rows, including completed results.
 - **Rerun… → All selected variants**: every selected variant and checked source.
 
-Rerunning any MTBP result targets the complete selected patient batch. An uncertain
+Rerunning any MTBP result targets the complete selected batch in that analysis. An uncertain
 submission retains its exact report ID and is reconciled before submitting it again.
 Previous evidence is archived in local session history before replacement.
 The result list includes **Pending**, **Verified match**, **Review match**,

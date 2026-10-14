@@ -31,10 +31,17 @@ def qc_flags(v: Variant) -> list[QualityFlag]:
             flags.append(QualityFlag('CNV', 'Failed', f'Copy Number {v.copy_number:g} <1.'))
         elif v.copy_number == 1:
             flags.append(QualityFlag('CNV review', 'Review', 'Copy Number =1; review the boundary value.'))
-    if kind == 'rnaexontiles' and v.call.upper() == 'NO CALL':
-        flags.append(QualityFlag('Expression imbalance', 'Failed', 'RNAExonTiles: NO CALL.'))
-    if kind == 'rnaexonvariant' and v.call.upper() == 'ABSENT':
-        flags.append(QualityFlag('RNAExonVariant', 'Report', 'RNAExonVariant: ABSENT.'))
+    call=v.call.strip().upper()
+    if kind == 'rnaexontiles':
+        if call == 'NO CALL':
+            flags.append(QualityFlag('Expression imbalance', 'Failed', 'RNAExonTiles: NO CALL.'))
+        elif call not in {'PRESENT','ABSENT'}:
+            flags.append(QualityFlag('Expression imbalance', 'Unknown', 'RNAExonTiles Call missing or unrecognized.'))
+    if kind == 'rnaexonvariant':
+        if call == 'ABSENT':
+            flags.append(QualityFlag('RNAExonVariant', 'Report', 'RNAExonVariant: ABSENT.'))
+        elif call != 'PRESENT':
+            flags.append(QualityFlag('RNAExonVariant', 'Unknown', 'RNAExonVariant Call missing or unrecognized.'))
     return flags
 
 

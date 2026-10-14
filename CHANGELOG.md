@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 — 14 October 2026
+
+- Keep each imported source in an independent, persistent analysis. OPA and Ion
+  Torrent profiles have their own assay, tissue, selection, quality, searches and
+  export, including when a sample ID is shared. Older sessions migrate without
+  losing rows, assessments or evidence; unconfirmed profiles require review.
+- Replace the combined Excel layout with a compact Findings / Quality / Sources
+  report and a separate VPM-style evidence attachment. Preserve every original
+  row in hidden Raw data and retain source assertions apart from app assessments.
+- Use profile-specific all-row quality sections. Absent CNV/RNA/run-level data
+  remains Not supplied; missing values remain Unknown.
+- Isolate MTBP batch freshness and capture folders by analysis. A rerun expands
+  only its analysis's selected rows; legacy combined evidence remains outdated
+  until rerun. Publish versioned Excel bundles together, with actionable save errors.
+
 ## 0.5.1 — 13 October 2026
 
 - Keep Genotype when an Ion Reporter export has a present but empty Call cell.

@@ -4,8 +4,9 @@ import sys
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from PIL import Image,ImageDraw,ImageFont
 from solide.models import Session,Variant
+from solide.analyses import ensure_analyses
 from solide.evidence import batch_fingerprint
-from solide.reporting import export_patient
+from solide.reporting import export_analysis
 
 
 def main():
@@ -28,15 +29,17 @@ def main():
     s=Session(variants=[v,Variant(patient=v.patient,gene='MET',kind='CNV',copy_number=0.8,coverage=420,
         call='ABSENT',source_file='synthetic.tsv',source_row=3),
         Variant(patient=v.patient,gene='ALK',kind='RNA Exon Tiles',call='NO CALL',source_file='synthetic.tsv',source_row=4)])
+    for row in s.variants:row.assembly='GRCh37'
+    ensure_analyses(s);analysis=s.analyses[0];analysis.profile='OPA';analysis.assay='Oncomine Precision Assay'
     identity={'gene':v.gene,'assembly':'GRCh37','hgvs':v.transcript+':'+v.coding}
     common={'fingerprint':v.fingerprint('Other'),'captured_at':'2026-10-09T12:00:00+00:00','tissue':'Other'}
     v.evidence['BRCA Exchange']={**common,'database':'BRCA Exchange','status':'found','clinical_significance':'Synthetic source assertion',
         'accession':'DEMO','url':'https://brcaexchange.org/variants','summary':'Synthetic result: no live database query.',
         'raw':{'query_basis':'full_hgvs','identity_verification':{'requested':identity,'returned':identity,'accepted':True,'method':'full_hgvs'}}}
-    v.evidence['MTBP']={**common,'database':'MTBP','status':'found','mtbp_batch':batch_fingerprint(s,v.patient),
+    v.evidence['MTBP']={**common,'database':'MTBP','status':'found','analysis_id':analysis.id,'mtbp_batch':batch_fingerprint(s,v.patient),
         'summary':'Synthetic source panel. Confirm source identity before interpretation.',
         'raw':{'screenshots':[{'path':str(capture),'label':'Synthetic panel'}],'patient_report_screenshot':str(capture)}}
-    path=export_patient(s,v.patient,root)
+    path=export_analysis(s,analysis.id,root).report
     (root/'latest-report.txt').write_text(str(path),encoding='utf8');print(path)
 
 

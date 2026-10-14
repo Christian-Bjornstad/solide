@@ -3,6 +3,8 @@ from __future__ import annotations
 from io import BytesIO
 from math import ceil
 from pathlib import Path
+import json
+import math
 import re
 from PIL import Image as PillowImage
 from openpyxl.drawing.image import Image
@@ -121,3 +123,26 @@ def put_image(sheet,path,row,label='',crop_top=0):
             return row
     except (OSError,ValueError,PillowImage.DecompressionBombError):
         sheet.cell(row,1,'Screenshot could not be read.');return row+2
+
+
+def mtbp_content_top(path):
+    """Return a validated display crop; the original capture stays untouched."""
+    path=Path(path);geometry=path.with_suffix('.geometry.json')
+    if not path.is_file() or not geometry.is_file():return 0
+    try:
+        data=json.loads(geometry.read_text(encoding='utf8'))
+        top=float(data.get('content_top') or 0);height=float(data.get('height') or 0)
+        if top<=0:
+            candidates=[]
+            for item in data.get('rows') or []:
+                if not isinstance(item,dict):continue
+                box=item.get('section') or item.get('header') or item.get('row')
+                if isinstance(box,dict):
+                    value=float(box.get('y') or 0)
+                    if math.isfinite(value) and value>0:candidates.append(value)
+            top=min(candidates,default=0)
+        if not math.isfinite(top) or not math.isfinite(height) or not 0<top<height:return 0
+        with PillowImage.open(path) as original:
+            pixel_top=round(top*original.height/height)
+            return pixel_top if 0<pixel_top<original.height-1 else 0
+    except (OSError,ValueError,TypeError,json.JSONDecodeError,AttributeError):return 0

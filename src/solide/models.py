@@ -38,6 +38,7 @@ class Variant:
     nomenclature_verified: bool = False
     raw: dict = field(default_factory=dict)
     evidence: dict = field(default_factory=dict)
+    analysis_id: str = ''
 
     def fingerprint(self, tissue: str) -> str:
         # Sample identifiers deliberately absent; only evidence inputs determine freshness.
@@ -57,11 +58,25 @@ class ImportResult:
 
 
 @dataclass
+class Analysis:
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    patient: str = ''
+    profile: str = 'Unassigned'
+    assay: str = 'Unknown'
+    source_format: str = ''
+    source_file: str = ''
+    source_hash: str = ''
+    metadata: dict = field(default_factory=dict)
+    assembly: str = 'Unknown'
+
+
+@dataclass
 class Session:
     variants: list[Variant] = field(default_factory=list)
     tissues: dict[str, str] = field(default_factory=dict)
     history: list[dict] = field(default_factory=list)
-    schema_version: int = 1
+    schema_version: int = 2
+    analyses: list[Analysis] = field(default_factory=list)
 
     @property
     def patients(self) -> list[str]:
@@ -69,6 +84,19 @@ class Session:
 
     def tissue(self, patient: str) -> str:
         return self.tissues.get(patient, 'Other')
+
+    def tissue_for(self, variant: Variant) -> str:
+        return self.tissues.get(variant.analysis_id, self.tissue(variant.patient))
+
+    def analysis(self, analysis_id: str) -> Analysis:
+        for analysis in self.analyses:
+            if analysis.id == analysis_id:
+                return analysis
+        raise ValueError('Unknown analysis.')
+
+    def analysis_variants(self, analysis_id: str) -> list[Variant]:
+        self.analysis(analysis_id)
+        return [variant for variant in self.variants if variant.analysis_id == analysis_id]
 
     def to_dict(self) -> dict:
         return asdict(self)

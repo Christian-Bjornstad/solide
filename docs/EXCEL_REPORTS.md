@@ -1,50 +1,85 @@
-# Report and assessment contract — v0.4.0
+# Analysis report contract — v0.6.0
 
-The laboratory reference files were inspected locally for structure and useful
-workflow patterns. No patient source content was added to the repository.
-The review templates informed the app's manual categories and assessment fields;
-their clinical scoring formulas are not an automatic classifier in Solide.
+One imported source is one analysis. OPA and Ion Torrent are explicit report
+profiles; assay describes the panel (such as Childhood or BRCA/HRR). Matching
+sample IDs never join separate sources. Each analysis has a persistent local ID,
+its own tissue and complete source metadata. Analysis IDs are not sent to databases.
+The active analysis controls rows, searches and export across the app.
 
-Manual assessment lives in the session. Each change records previous and updated
-classification, decision, reviewer, notes and UTC review time. Older sessions load
-with blank classification and `Pending` decision. Database assertions remain
-separate. Identity and tissue changes invalidate evidence; assessment text does
-not change a biological search fingerprint.
+Schema 1 sessions migrate by source, sample and assembly without changing row
+IDs, evidence, clinical fields or source cells. Unknown Genexus profiles are
+Unassigned until confirmed. Repeat imports with the same source hash, sample,
+profile and assay reuse the existing analysis. Different confirmation creates
+a distinct analysis; assembly conflicts require review.
 
-The Excel report is an immutable export version, not an input for assessment
-readback. Selected variants appear in Overview with their explicit decision,
-including Pending and Exclude. Quality includes all imported patient rows.
-Only current, readable image captures are embedded. Full MTBP captures are shared
-within the workbook; long images are split into consecutive segments without
-changing the original capture files.
+## Compact report
 
-Source provenance includes file hash, sheet and physical row. Raw data retains
-source column order, blank-header values and literal text safely. Mixed source
-schemas form an ordered union beginning with the first imported source schema;
-the source sheet/hash/row resolve each record. Full originals remain in the
-session. Formula characters are not executable spreadsheet formulas.
+Each version has three visible worksheets:
 
-Original raw tables are accepted after their preamble. Duplicate header names,
-multiple competing tables and generated presentation copies are rejected.
-Reviewed child templates and target/gene coverage are intentionally different
-source types: they must not be interpreted as sequence variants. Row Coverage
-does not establish whole-gene coverage. No PDF output is created.
+- **Findings**: selected variants, source transcript, variant, protein, AF, row
+  coverage, laboratory classification and decision. Full assessment notes,
+  reviewer and review date follow the table when recorded in the app.
+- **Quality**: all analysis rows, including unselected rows. OPA separates row
+  coverage, CNV, RNA expression imbalance and RNA exon variants. Ion includes
+  row coverage, supplied CNV, identity checks and coverage limitations.
+- **Sources**: variant/source match assessment, separate source assertion,
+  capture date and attachment link. Hidden columns retain response and provenance.
 
-BRCA Exchange runs for exact canonical BRCA1/BRCA2 gene labels. A found result
-requires an exact versioned HGVS or explicit hg37 allele match, one unambiguous
-candidate and a matching detail version. The source assertion, accession and
-release remain visible; they never populate manual classification automatically.
-Unknown assembly, unresolved nomenclature, conflicting identities and incomplete
-API pages remain review/error states. API use follows its
-[official documentation](https://brcaexchange.org/about/api) and
-[current server implementation](https://github.com/BRCAChallenge/brca-exchange/blob/master/django/data/views.py).
+Complete original columns and every row remain in hidden **Raw data**. To read
+these, right-click a worksheet tab and choose **Unhide → Raw data**. Source order,
+blank values and literal text are preserved; apparent formulas are stored as text.
+Fields that Excel cannot store losslessly cause an explicit export error.
+Source file/hash/physical row identify each record. Source files remain intact.
 
-MTBP checkpoints its analysis ID before click dispatch and cancellable waits.
-Retries of a current batch pass retained report evidence for reconciliation.
-Changed variant identity, tissue or selection creates a different batch; older
-evidence remains in history. The account owner requested an empty MTBP portal:
-all existing reports are deleted before submission, and each new report is
-deleted after local audit/capture. Deletion is verified with up to three delayed
-server checks. A failed cleanup blocks the next submission. This policy includes
-reports created outside Solide; the configured account should be dedicated to
-this workflow. Failed or incomplete captures remain explicit local statuses.
+Coverage <500 applies to the exported row, not a whole gene. Missing numeric
+values remain Unknown. Missing categories are Not supplied, rather than passing
+QC. CNV=1 requires review. RNAExonVariant ABSENT is a reportable status, not a
+positive variant. Filtered exports state that QC covers supplied rows only.
+Source metadata does not establish missing run/chip metrics.
+
+## Separate VPM-style attachment
+
+**Include Excel attachment** creates another workbook when current source
+evidence exists. Its **Index** links to variant sheets, with sources ordered:
+MTBP, Franklin, ClinVar, OncoKB, COSMIC, BRCA Exchange, Mutalyzer and SpliceAI.
+Unsearched variants do not get empty evidence sheets. Each combined MTBP report
+is included once per original capture in its own sheet, linked from the variants.
+
+Only current, readable, eligible images are embedded. Outdated or conflicting
+results remain explicit source states. Tall captures are split into consecutive
+lossless segments and displayed at a readable width. Valid MTBP geometry can
+crop introductory material from the displayed copy; its original PNG stays
+unchanged and remains linked. Private, deleted MTBP portal links are omitted.
+
+Reports and attachments have versioned, paired names. Relative links work while
+the two Excel files stay together. Stage both files, publish the attachment first
+and the main report last. Failed publication removes its new orphan attachment;
+prior exports are preserved. Retry save errors without repeating searches.
+Clearing the attachment option still exports the compact report and source ledger.
+
+## Assessment and evidence
+
+Classification, decision, reviewer and comments are edited in the app. Each
+change records prior values and review time. Excel is a snapshot; workbook edits
+are not read back. Database assertions never fill laboratory classification.
+No PDF output is created.
+
+Identity and tissue changes invalidate evidence. MTBP freshness additionally
+includes the local analysis context and complete selected analysis batch. Rerunning
+one MTBP result expands only that analysis. Old combined batches remain outdated
+until rerun, with evidence retained. Capture folders separate analyses and runs.
+
+BRCA Exchange applies only to BRCA1/BRCA2. Mutalyzer suggestions and SpliceAI
+predictions require review. A found record alone does not prove an exact variant
+match. Unknown assemblies, conflicting alleles and incomplete responses cannot
+become verified evidence.
+
+The account owner's MTBP policy remains: delete all existing reports before
+submission and delete each new report after local audit/capture. Verify deletion
+with delayed server checks; failed cleanup blocks a new submission. This includes
+reports created outside Solide. Uncertain submissions retain their exact remote
+report ID for reconciliation before resubmission.
+
+Laboratory files informed structure and preservation checks. Clinical source
+content is not published. VPM attachment concepts were checked against the
+[pinned Archer writer](https://github.com/Christian-Bjornstad/Archer-prosess/blob/b5f50c6e031ad9cfe8374e99d7e47b92c22872d1/src/archer_processor/reports/patient_excel.py).
