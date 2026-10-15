@@ -1,6 +1,23 @@
 # Archer reuse
 
-The v0.6.0 Excel attachment design was checked against VPM (the Archer app) on
+Latest selective port: branch `feat/workstation-improvements-2026-10-07`, commit
+`c12a1b8bb840e33a41216148bc13be1e5c69682a`, checked 15 October 2026.
+The workbook writer is unchanged since b5f50c6; v0.7.0 now follows that writer's
+single-workbook layout, navy/blue styles, source order, variant tabs and original
+full-height PNG placement at up to 1120 px. Only Solide's database columns are used;
+all-row Quality and hidden Sources/Raw data preserve the laboratory workflow.
+
+New runtime ports include MTBP hidden identity and rowspan parsing, shared-cell
+captures, parser/capture consistency, per-report page recovery, durable recovery
+audits, bounded variant tokens and variant-specific COSMIC caching, OncoKB
+login/absence handling, Franklin onboarding Skip/capture recovery, and Edge
+broker startup. Solide's exact ClinVar API REF/ALT verification stays in place;
+its cache now checks allele identity and indels use exact genomic queries.
+Legacy MTBP gene-only/uncertain absence results are rechecked through the shared
+matching-revision helper without mutating saved evidence.
+
+Historical v0.6.0 design (replaced by the single workbook above):
+The Excel attachment design was checked against VPM (the Archer app) on
 14 October 2026: branch `feat/workstation-improvements-2026-10-07`, revision
 `b5f50c6e031ad9cfe8374e99d7e47b92c22872d1`,
 [`reports/patient_excel.py`](https://github.com/Christian-Bjornstad/Archer-prosess/blob/b5f50c6e031ad9cfe8374e99d7e47b92c22872d1/src/archer_processor/reports/patient_excel.py).
