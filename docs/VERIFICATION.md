@@ -1,6 +1,29 @@
-# Verification — Solide v0.7.0
+# Verification — Solide v0.7.1
 
 Dates: 9–15 October 2026. Local Windows / Python 3.12.
+
+## Clean attachments and Excel repair regression — 15 October 2026
+
+- **565 tests passed** in 39.95 seconds. New regressions cover both report
+  profiles, blank manual-note areas, source labels/IDs/links, stale-source
+  exclusion, absence of Quality/details/internal links/tables, and canonical
+  worksheet pane selections after repeated freeze changes.
+- Reproduced the duplicate obsolete selection records in a previously exported
+  worksheet view. The save path now rebuilds exactly the valid frozen-pane
+  selections. Default exports use no structured-table parts; hidden raw/source
+  data remain complete literal ranges.
+- Regenerated thirteen actual attachments. Opened all thirteen read-only with
+  Microsoft Excel automation using normal load and no requested repair/recovery;
+  every workbook opened and retained Overview with no Quality sheet. Existing
+  user workbooks and earlier exports were not modified.
+- Independent audit retained all 3,280 original rows, complete response/metadata
+  round trips and all 272 pixel-exact source images. No internal/local navigation
+  links remain. Read-only artifact rendering produced 140 worksheet ranges plus
+  three full-width header views; source classifications, images and the blank
+  Overview note box were visually checked.
+- Source assertions are presented without Review match / Verified match prefixes;
+  no laboratory assessment/source-detail appendix follows screenshots. App
+  classifications, original rows and checks remain unchanged in the saved session.
 
 ## Normalization and Archer/VPM reports — 15 October 2026
 

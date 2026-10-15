@@ -60,7 +60,7 @@ Importing the same file again with the same sample, profile and assay reopens it
 existing analysis without discarding assessments or duplicating rows.
 
 The workbook follows Archer/VPM: **Overview**, a shared **MTBP** report when
-available, individual variant sheets in source order, and **Quality**. Its source
+available and individual variant sheets with source screenshots. Its source
 columns are Solide's eight databases. Complete responses and original rows stay
 in hidden **Sources** and **Raw data** (right-click a tab and choose Unhide).
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
@@ -201,30 +201,24 @@ work-PC environment still require a laboratory pilot.
 
 ## Excel reports
 
-Each export creates a new timestamped workbook per patient without replacing
-previous files. The original exports remain untouched.
+Each export creates one new timestamped attachment for the active OPA or Ion
+Torrent analysis, preserving previous exports and original inputs.
 
-- **Overview**: eight compact columns with stacked variant identity, numeric
-  AF/coverage, QC status, app classification/decision and linked match summaries.
-- **Quality**: all QC flags, including unselected rows and Report/Review/Unknown
-  statuses, with links to the exact original row.
-- **Evidence**: linked variant index, full app assessments, imported annotations,
-  reviewed identity, source assertions and current source captures. Shared full
-  MTBP reports appear once in this worksheet. Long notes split into readable rows.
-- **Raw data**: original source values and column order, including unnamed
-  columns, followed by source hash, sheet and physical row references.
-- **Searches** (hidden audit worksheet): every result, match status, accession,
-  timestamp, URL and source response, with links to its exact Evidence section.
-  Unhide the worksheet in Excel when the full technical record is needed.
+- **Overview**: variant identity and concise source findings. MTBP shows its
+  functional relevance/evidence text, Franklin and ClinVar their classifications,
+  OncoKB its oncogenicity, and COSMIC a linked mutation ID. The upper note box
+  and Comment cells start blank for manual notes in Excel. Gene names are plain text.
+- **MTBP**: the shared combined report, when current capture evidence is available.
+- **Variant sheets**: an identity header and source screenshots in database order.
+  No lengthy assessment/source-detail appendices or internal worksheet links.
+- Hidden **Sources** and **Raw data**: complete API responses, provenance and
+  original values retained as literal ranges without Excel structured tables.
 
-Tall captures are segmented at readable width without altering source pixels;
-outdated screenshots are omitted. Report format 3 has four visible worksheets.
-
-`Include`, `Exclude` and `Pending` are saved app decisions. The workbook retains
-every selected variant with its decision for review; it does not automatically
-issue a final clinical report or classify variants from database assertions.
-Default manual categories follow the reference template, and custom laboratory
-classification text can be entered.
+The exported attachment has no Quality worksheet. Review all-row quality and
+laboratory assessments in the app. Matching states and retry diagnostics remain
+in the app; unavailable or outdated evidence cannot appear as a positive result.
+Full-height source images remain intact, with valid MTBP display cropping only.
+Excel edits are not read back into the app.
 
 Import supports original Ion Reporter TSV and Genexus TSV/XLSX exports with one
 unambiguous variant table. The supplied Childhood/Oncomine Ion export and

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.1 — 15 October 2026
+
+- Simplify both attachment profiles to Overview and source screenshots; remove
+  the Quality worksheet, source-detail and laboratory-assessment appendices,
+  internal navigation links and default text in the Overview note/comment areas.
+- Show concise source findings and classifications; COSMIC displays linked IDs.
+  Keep source identity checks and retry states in the app without match-status
+  prefixes in Excel. Preserve unavailable/outdated distinctions.
+- Retain complete hidden provenance as plain literal ranges without Excel
+  structured tables. Normalize saved view selections so repeated freezes do not
+  produce invalid duplicate panes. Native Excel normal-load checks passed for
+  all thirteen actual regenerated workbooks.
+
 ## 0.7.0 — 15 October 2026
 
 - Check Mutalyzer normalization against independently validated hg19 source

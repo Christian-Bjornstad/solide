@@ -65,7 +65,7 @@ def test_default_is_one_workbook_with_vpm_layout_and_source_order(tmp_path):
     bundle=export_analysis(session,'analysis-a',tmp_path)
     assert bundle.paths==(bundle.report,) and bundle.attachment is None
     with load_workbook(bundle.report) as book:
-        assert book.sheetnames==['Overview','MET','EGFR','Quality','Sources','Raw data']
+        assert book.sheetnames==['Overview','MET','EGFR','Sources','Raw data']
         assert book['Sources'].sheet_state==book['Raw data'].sheet_state=='hidden'
         overview=book['Overview']
         assert {'A1:M2','A6:M6','D3:M4'}<={str(item) for item in overview.merged_cells.ranges}
@@ -75,14 +75,14 @@ def test_default_is_one_workbook_with_vpm_layout_and_source_order(tmp_path):
         assert [overview.column_dimensions[col].width for col in 'ABCDE']==[14,31,25,52,32]
         assert all(overview.column_dimensions[col].width==22 for col in 'FGHIJKLM')
         assert overview.freeze_panes=='A8' and overview.auto_filter.ref=='A7:M9'
-        assert overview.row_dimensions[8].height>=108
+        assert overview.row_dimensions[8].height>=72
         assert overview['A8'].fill.fgColor.rgb[-6:]=='EAF3FA'
         assert overview['A9'].fill.fgColor.rgb[-6:]=='FFFFFF'
         variant=book['MET']
         assert 'A1:L2' in {str(item) for item in variant.merged_cells.ranges}
-        assert variant['A5'].value=='Compact evidence and source links'
+        assert variant['A5'].value is None
         assert variant.freeze_panes=='A5'
-        assert [variant.cell(6+i,1).value for i in range(8)]==list(SOURCE_ORDER)
+        assert variant.max_row<=5 and not variant._images
         assert 'gnomAD AF' not in text(book) and 'WHO driver gene' not in text(book)
 
 
@@ -110,7 +110,7 @@ def test_vpm_images_keep_full_pixels_and_reserve_height_without_segmentation(tmp
     assert sha256(path.read_bytes()).hexdigest()==original_hash
 
 
-def test_vpm_keeps_scope_all_qc_raw_and_app_assessment_distinct(tmp_path):
+def test_vpm_keeps_raw_scope_and_leaves_app_assessments_in_the_app(tmp_path):
     note=('Full assessment — long note.\n'*100)+'END OF APP ASSESSMENT'
     session,rows=make_session(Variant(gene='EGFR',selected=True,comment=note,classification='Lab assessment',
         report_decision='Include',reviewer='Lab reviewer',reviewed_at='2026-10-15T09:00:00Z',
@@ -126,12 +126,13 @@ def test_vpm_keeps_scope_all_qc_raw_and_app_assessment_distinct(tmp_path):
     with load_workbook(bundle.report) as book:
         all_values=text(book)
         assert 'DO-NOT-MIX' not in all_values
-        assert 'Lab assessment' in all_values and 'Database assertion' in all_values
+        assert 'Lab assessment' not in all_values and 'Database assertion' in all_values
         assert book['Overview']['B8'].value=='c.1A>T'
-        assert 'NC_000007.13:g.1A>T' in all_values and 'NM_005228.5' in all_values
-        assert 'END OF APP ASSESSMENT' in all_values and 'Lab reviewer' in all_values
-        quality='\n'.join(str(cell.value) for row in book['Quality'] for cell in row if cell.value is not None)
-        assert all(word in quality for word in ['LOW','Failed','RNA','Unknown','RNAABSENT','Report'])
+        assert 'NM_005228.5' in all_values
+        assert rows[0].corrected_hgvs=='NC_000007.13:g.1A>T'
+        assert 'END OF APP ASSESSMENT' not in all_values and 'Lab reviewer' not in all_values
+        assert rows[0].comment==note and rows[0].reviewer=='Lab reviewer'
+        assert 'Quality' not in book.sheetnames
         assert book['Raw data']['B2'].value=='=1+1' and book['Raw data']['B2'].data_type=='s'
         assert book['Raw data'].max_row==5
         sources=book['Sources']
@@ -202,7 +203,7 @@ def test_unassigned_and_no_evidence_export(tmp_path):
         assert 'Franklin' in text(book) and book['Sources'].sheet_state=='hidden'
 
 
-def test_structured_normalization_is_visible_and_never_becomes_lab_classification(tmp_path):
+def test_normalization_details_stay_in_hidden_storage_and_app_classification_is_unchanged(tmp_path):
     session,rows=make_session(Variant(gene='PTEN',selected=True,classification='Laboratory review'))
     raw={'original':'NM_000314.8:c.100_102delinsA',
          'normalization':{'normalized_description':'NM_000314.8:c.100_101del'},
@@ -211,12 +212,12 @@ def test_structured_normalization_is_visible_and_never_becomes_lab_classificatio
              'genomic_hgvs':'NC_000010.10:g.1_2del','source_genomic_query':'10-1-AC-A'}}
     rows[0].evidence['Mutalyzer']=result(rows[0],source='Mutalyzer',status='needs_review',raw=raw)
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
-        fields={row[0].value:row[2].value for row in book['PTEN'] if row[0].value}
-        assert fields['Normalization status']=='Conflict'
-        assert fields['Original name']==raw['original']
-        assert fields['Checked name']==raw['nomenclature_assessment']['suggested_hgvs']
-        assert fields['Genomic identity']=='Not confirmed'
-        assert fields['Lab classification']=='Laboratory review'
+        assert 'Mutalyzer – Check variant' in text(book)
+        assert not book['PTEN']._images
+        stored=next(row for row in book['Sources'] if row[7].value==rows[0].id and row[9].value=='JSON response')
+        assert json.loads(''.join(str(cell.value or '') for cell in stored[10:]))==raw
+        assert rows[0].classification=='Laboratory review'
+
 
 
 def test_duplicate_gene_names_reservations_and_literal_app_notes(tmp_path):
@@ -225,8 +226,9 @@ def test_duplicate_gene_names_reservations_and_literal_app_notes(tmp_path):
     bundle=export_analysis(session,'analysis-a',tmp_path,include_evidence=False)
     with load_workbook(bundle.report) as book:
         assert book.sheetnames[:4]==['Overview','MET p.X1Y','MET p.X1Y-2','Quality-2']
-        fields={row[0].value:row[2] for row in book['MET p.X1Y'] if row[0].value}
-        assert fields['Assessment'].value=='=literal app note' and fields['Assessment'].data_type=='s'
+        assert rows[0].comment=='=literal app note'
+        assert '=literal app note' not in text(book)
+        assert not any(cell.data_type=='f' for sheet in book for row in sheet for cell in row)
 
 
 def test_exports_version_without_overwriting_and_atomic_failure_has_no_partial_file(tmp_path,monkeypatch):

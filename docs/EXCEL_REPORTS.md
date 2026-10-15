@@ -1,4 +1,4 @@
-# Analysis report contract — v0.7.0
+# Analysis report contract — v0.7.1
 
 One original source is one persistent OPA or Ion Torrent analysis. Sample IDs do
 not merge separate sources. Selection, tissue, queries and export use the active
@@ -10,30 +10,35 @@ The default export is one versioned Excel workbook, following the pinned Archer
 patient writer's layout, colours, source order and original image placement:
 
 - **Overview**: navy title rows 1–2, sample/date rows 3–4, section row 6 and
-  filterable findings from row 8. Columns are Gene, HGVSc, HGVSp, Short evidence,
-  Comment, then MTBP, Franklin, ClinVar, OncoKB, COSMIC, BRCA Exchange, Mutalyzer
-  and SpliceAI. Solide's analysis context replaces Archer's app comment heading.
-- **MTBP**, when current evidence is available: one copy of each combined report,
-  linked from variant sheets. It follows Overview.
-- **Variant sheets**: compact source statuses/links, source screenshots, recorded
-  laboratory assessment and complete relevant source details. Only selected rows
-  get variant sheets; no Archer germline/artifact exclusion rules are applied.
-- **Quality**: all imported analysis rows, including unselected rows; OPA and Ion
-  retain their own coverage/CNV/RNA/identity sections and missing-data warnings.
-- Hidden **Sources** and **Raw data** retain all responses, metadata, original
-  ordered cells, source hashes and physical rows. Right-click a tab and choose
-  Unhide to inspect them. Large JSON uses exact literal chunks, not truncation.
+  filterable findings from row 8. The merged D3:M4 box and Comment cells are
+  blank for manual Excel notes. Gene names are plain text, with no worksheet links.
+- Source columns show the actual source content: MTBP functional relevance and
+  evidence level, Franklin/ClinVar classifications, OncoKB oncogenicity, COSMIC
+  identifiers and BRCA expert classification. Only current usable source records
+  get an external link. Not-found results and unavailable/outdated evidence remain
+  distinguishable; operational Review match / Verified match labels stay in the app.
+- **MTBP**, when available: one copy of each combined report after Overview.
+- **Variant sheets**: identity header followed by source screenshot sections.
+  No repeated source-detail tables or laboratory-assessment appendix after the images.
+  Unqueried/inapplicable sources add no empty sections. No internal navigation links.
+- No **Quality** worksheet in either report profile. All-row QC remains in the app.
+- Hidden **Sources** and **Raw data** retain full responses, metadata and original
+  ordered cells. They use literal ranges, without Excel structured tables or
+  local capture links. Right-click a tab and choose Unhide to inspect them.
+  Large JSON uses exact literal chunks, not truncation.
 
 Original screenshots are embedded intact at up to 1120 px width without shrinking
 long captures to a fixed height. Valid MTBP geometry crops only the display copy;
 its original PNG remains unchanged. Shared full reports are not repeated under
 variants. Stale, conflicting, incomplete or unreadable captures are excluded with
-an explicit state. The source assertions never become laboratory classifications.
+an explicit state. The source assertions never become laboratory classifications. App assessments
+remain in the saved app session; only source content is presented in the attachment.
 
 **Include source screenshots** controls images in the same workbook. Saving a new
 version preserves earlier exports; retry a save error without rerunning searches.
 The older compact exporter remains an internal compatibility API, not the default.
-No PDF is produced and Excel edits are not read back into the app.
+No PDF is produced and Excel edits are not read back into the app. Frozen worksheet
+views are normalized once before save, removing obsolete/duplicate pane selections.
 
 ## Mutalyzer normalization
 

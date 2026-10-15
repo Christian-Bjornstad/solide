@@ -729,6 +729,26 @@ def _evidence_attachment(analysis,variants,scoped,directory):
     index.print_area=f'A1:E{index.max_row}';return workbook,anchors
 
 
+def _normalize_excel_views(workbook):
+    """Repeated freeze_panes assignments must not retain obsolete selections."""
+    from openpyxl.worksheet.views import Selection
+    from openpyxl.utils.cell import coordinate_to_tuple
+    for sheet in workbook:
+        view=sheet.sheet_view;pane=view.pane
+        if not pane:
+            view.selection=[Selection(activeCell='A1',sqref='A1')];continue
+        top,left=coordinate_to_tuple(pane.topLeftCell or 'A1')
+        if pane.xSplit and pane.ySplit:
+            from openpyxl.utils import get_column_letter
+            cells=[('topRight',f'{get_column_letter(left)}1'),('bottomLeft',f'A{top}'),
+                   ('bottomRight',pane.topLeftCell)]
+            pane.activePane='bottomRight'
+        else:
+            pane.activePane='topRight' if pane.xSplit else 'bottomLeft'
+            cells=[(pane.activePane,pane.topLeftCell)]
+        view.selection=[Selection(pane=name,activeCell=cell,sqref=cell) for name,cell in cells]
+
+
 def _save_report_bundle(main,attachment,report_path,attachment_path):
     """Stage both files completely, then publish the main report last."""
     staged=[];published_attachment=False
@@ -736,7 +756,7 @@ def _save_report_bundle(main,attachment,report_path,attachment_path):
         for workbook,path in [(attachment,attachment_path),(main,report_path)]:
             if workbook is None:continue
             fd,name=tempfile.mkstemp(dir=path.parent,prefix='.solide-',suffix='.xlsx');os.close(fd)
-            temporary=Path(name);staged.append((temporary,path));workbook.save(temporary)
+            temporary=Path(name);staged.append((temporary,path));_normalize_excel_views(workbook);workbook.save(temporary)
         for temporary,path in staged:
             if path.exists():raise FileExistsError('An export version already exists. Retry export to create a new version.')
             os.replace(temporary,path)
@@ -777,21 +797,51 @@ def export_analysis_compact(session:Session,analysis_id:str,directory:Path,inclu
 
 
 def _vpm_compact(variant,source,scoped):
+    """Show source content; operational matching states remain in the app."""
     item=variant.evidence.get(source)
-    if not item:return 'Not applicable' if source=='BRCA Exchange' and variant.gene not in {'BRCA1','BRCA2'} else 'Not run'
-    label=assess_evidence(variant,item,scoped).label
+    if not item:return ''
+    assessment=assess_evidence(variant,item,scoped).label
+    if assessment=='Not applicable':return ''
+    if assessment=='No match':return 'Not found'
+    if assessment=='Outdated':return 'Outdated'
+    raw=item.get('raw',{})
+    if source=='Mutalyzer' and evidence_is_current(variant,item,scoped.tissue_for(variant),scoped):
+        checked=raw.get('nomenclature_assessment') or {}
+        if checked.get('identity_confirmed') is True and checked.get('status') in {'Unchanged','Normalized'}:
+            return checked.get('status')
+        return 'Check variant'
+    if assessment not in {'Verified match','Review match'}:
+        return 'Capture unavailable' if assessment=='Missing capture' else 'Check result'
     assertion=' '.join(source_classification(item).split())
-    if len(assertion)>72:assertion=assertion[:71]+'…'
-    return f'{label} — {assertion}' if assertion else label
+    if source=='COSMIC':
+        identifiers=re.findall(r'COS[MV]\d+',str(item.get('accession','')))
+        for key in ('mutation_id','cosmic_id','genomic_mutation_id','legacy_mutation_id'):
+            identifiers.extend(re.findall(r'COS[MV]\d+',str(raw.get(key,''))))
+        return ', '.join(dict.fromkeys(identifiers)) or 'Found'
+    if source=='SpliceAI':
+        scores=raw.get('response',{}).get('scores') or []
+        deltas=[float(row[key]) for row in scores for key in ('DS_AG','DS_AL','DS_DG','DS_DL') if row.get(key) is not None]
+        return f'Max delta {max(deltas):.3f}' if deltas else 'Found'
+    if not assertion:
+        for key in ('functional_relevance','oncogenicity','classification','expert_classification'):
+            value=raw.get(key)
+            if isinstance(value,str) and value.strip():assertion=' '.join(value.split());break
+    if not assertion:
+        match=re.search(r'(?:classification|oncogenicity|functional_relevance)=([^;|]+)',item.get('summary',''),re.I)
+        if match:assertion=match[1].strip()
+    if source=='MTBP':
+        evidence=re.search(r'Evidence\s+[A-Z](?:\s*\([^)]*\))?',
+                           str(raw.get('functional_evidence',''))+' '+item.get('summary',''),re.I)
+        if evidence and evidence[0].casefold() not in assertion.casefold():
+            assertion=' – '.join(filter(None,[assertion,' '.join(evidence[0].split())]))
+    return assertion or 'Found'
 
 
-def _vpm_comment(variant):
-    fields=[]
-    if variant.classification:fields.append('Lab classification: '+variant.classification[:200])
-    fields.append('Decision: '+variant.report_decision)
-    if variant.comment:fields.append(variant.comment[:300])
-    if len(variant.comment)>300 or len(variant.classification)>200:fields.append('Full assessment on variant sheet.')
-    return '\n'.join(fields)
+def _vpm_source_url(variant,source,scoped):
+    item=variant.evidence.get(source)
+    if not item or source=='MTBP':return ''
+    if assess_evidence(variant,item,scoped).label not in {'Verified match','Review match'}:return ''
+    return _public_source_url(source,item.get('url',''))
 
 
 def _vpm_variant_name(variant,index,counts,used):
@@ -815,8 +865,6 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     vpm_info_row(sheet,3,'Sample / dataset',analysis.patient,end_column=3)
     vpm_info_row(sheet,4,'Generated (UTC)',generated,end_column=3);sheet.cell(4,3).number_format='yyyy-mm-dd hh:mm'
     sheet.merge_cells('D3:M4')
-    pending=sum(variant.report_decision=='Pending' for variant in selected)
-    sheet.cell(3,4,' | '.join([analysis.profile,analysis.assay,analysis.assembly])+('\nDraft: pending laboratory assessments' if pending else ''))
     sheet.cell(3,4).alignment=Alignment(vertical='top',wrap_text=True)
     for row in sheet.iter_rows(min_row=3,max_row=4,min_col=4,max_col=13):
         for cell in row:cell.fill=PatternFill('solid',fgColor=VPM_COLORS['pale_orange'])
@@ -828,15 +876,14 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     for row,variant in enumerate(selected,8):
         labels=[_vpm_compact(variant,source,scoped) for source in SOURCE_ORDER]
         values=[variant.gene,variant.coding,variant.protein,
-                '\n'.join(f'{source} - {label}' for source,label in zip(SOURCE_ORDER,labels)),
-                _vpm_comment(variant),*labels]
+                '\n'.join(f'{source}: {label}' for source,label in zip(SOURCE_ORDER,labels) if label),
+                '',*labels]
         for column,value in enumerate(values,1):
             cell=sheet.cell(row,column,safe_text(value));cell.border=vpm_border()
             cell.alignment=Alignment(vertical='top',wrap_text=True)
             cell.fill=PatternFill('solid',fgColor=VPM_COLORS['pale_blue'] if (row-8)%2==0 else VPM_COLORS['white'])
-        internal_link(sheet.cell(row,1),names[variant.id],label=variant.gene or 'Variant')
         for column,source in enumerate(SOURCE_ORDER,6):
-            url=_public_source_url(source,variant.evidence.get(source,{}).get('url',''))
+            url=_vpm_source_url(variant,source,scoped)
             if url:
                 sheet.cell(row,column).hyperlink=url;sheet.cell(row,column).style='Hyperlink'
                 sheet.cell(row,column).alignment=Alignment(vertical='top',wrap_text=True)
@@ -846,26 +893,13 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
             cell.border=vpm_border()
         lines=max(sum(max(1,len(textwrap.wrap(line,max(1,width-7)))) for line in str(value or '').split('\n'))
                   for value,width in zip(values,widths))
-        sheet.row_dimensions[row].height=min(409,max(108,lines*16+12))
+        sheet.row_dimensions[row].height=min(409,max(72,lines*16+12))
     for column,width in enumerate(widths,1):sheet.column_dimensions[get_column_letter(column)].width=width
     sheet.auto_filter.ref=f'A7:M{max(7,7+len(selected))}';sheet.freeze_panes='A8'
     sheet.print_area=f'A1:M{max(13,8+len(selected))}'
     if not selected:
-        sheet.merge_cells('A8:M8');sheet.cell(8,1,'No variants selected. Supplied rows and QC remain in the appendices.')
+        sheet.merge_cells('A8:M8');sheet.cell(8,1,'No variants selected.')
         sheet.cell(8,1).alignment=Alignment(wrap_text=True);sheet.row_dimensions[8].height=42
-
-
-def _vpm_field(sheet,row,label,value):
-    """Use VPM's two-column label and ten-column value without losing notes."""
-    if value in (None,''):return row
-    chunks=[value] if isinstance(value,datetime) else list(readable_chunks(str(value)))
-    for index,chunk in enumerate(chunks):
-        current_label=label if not index else label+' (continued)'
-        vpm_info_row(sheet,row,current_label,chunk)
-        sheet.row_dimensions[row].height=_text_height([current_label,chunk],[24,115],34)
-        if isinstance(chunk,datetime):sheet.cell(row,3).number_format='yyyy-mm-dd hh:mm'
-        row+=1
-    return row
 
 
 def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_reports):
@@ -880,20 +914,16 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
     sheet.cell(3,1).font=Font(color=VPM_COLORS['muted'],italic=True)
     sheet.cell(3,1).alignment=Alignment(wrap_text=True)
     sheet.row_dimensions[3].height=_text_height([sheet.cell(3,1).value],[145],30)
-    row=vpm_section(sheet,5,'Compact evidence and source links');anchors={}
+    row=5;anchors={}
     for source in SOURCE_ORDER:
         item=variant.evidence.get(source,{})
-        vpm_info_row(sheet,row,source,_vpm_compact(variant,source,scoped));sheet.row_dimensions[row].height=34
-        url=_public_source_url(source,item.get('url',''))
-        if url:
-            for column in (1,3):
-                sheet.cell(row,column).hyperlink=url;sheet.cell(row,column).style='Hyperlink'
-                sheet.cell(row,column).alignment=Alignment(vertical='top',wrap_text=True)
-        anchors[variant.id,source]=(name,row);row+=1
-    row=vpm_section(sheet,row+1,'Screenshots')
-    for source in SOURCE_ORDER:
-        item=variant.evidence.get(source,{})
+        if not item or item.get('status')=='not_applicable':continue
         row=vpm_section(sheet,row,source,source=source)
+        label=_vpm_compact(variant,source,scoped)
+        if label:sheet.cell(row-1,1,source+' – '+label)
+        url=_vpm_source_url(variant,source,scoped)
+        if url:sheet.cell(row-1,1).hyperlink=url
+        anchors[variant.id,source]=(name,row-1)
         allowed=bool(item) and _capture_export_allowed(variant,item,scoped)
         records=[record for record in _capture_records(item) if valid_capture(record['path'])] if allowed else []
         full=item.get('raw',{}).get('patient_report_screenshot')
@@ -901,8 +931,8 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
         if has_full:
             full_key=str(Path(full).resolve())
             records=[record for record in records if str(Path(record['path']).resolve())!=full_key]
-        if not include_evidence:message='Images excluded from this export. Local captures remain in Sources.'
-        elif not allowed and item:message=f'{assess_evidence(variant,item,scoped).label}: capture excluded until the result is recovered or verified.'
+        if not include_evidence:message='Images excluded.'
+        elif not allowed and item:message=_vpm_compact(variant,source,scoped)+': screenshot excluded.'
         elif not records and has_full:message='See the combined MTBP report.'
         elif not records:message='Screenshot not available.'
         else:message=''
@@ -920,39 +950,8 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
                 row=vpm_put_image(sheet,record['path'],row+1)+1
         if include_evidence and has_full:
             full_reports.setdefault(str(Path(full).resolve()),full)
-            internal_link(sheet.cell(row,1),'MTBP',label='Open combined MTBP report');row+=2
-    row=vpm_section(sheet,row+1,'Laboratory assessment')
-    for label,value in [('Lab classification',variant.classification),('Decision',variant.report_decision),
-                        ('Reviewer',variant.reviewer),('Reviewed at (UTC)',captured_time(variant.reviewed_at)),
-                        ('Assessment',variant.comment),('Reviewed HGVS',variant.corrected_hgvs),
-                        ('Reviewed genomic allele',variant.controlled_genomic)]:
-        row=_vpm_field(sheet,row,label,value)
-    row=vpm_section(sheet,row+1,'Source details')
-    for source,item in ordered_evidence(variant):
-        row=vpm_section(sheet,row,source,source=source)
-        for label,value in [('Match assessment',assess_evidence(variant,item,scoped).label),
-                            ('Source assertion',source_classification(item)),
-                            ('Captured (UTC)',captured_time(item.get('captured_at',''))),
-                            ('Accession',item.get('accession','')),
-                            ('Summary',_exported_response(source,item.get('summary','')))]:
-            row=_vpm_field(sheet,row,label,value)
-        for label,value in _attachment_service_fields(source,item.get('raw',{})):
-            row=_vpm_field(sheet,row,label,value)
-        if source=='Mutalyzer':
-            raw=item.get('raw',{});assessment=raw.get('nomenclature_assessment') or {}
-            if isinstance(assessment,dict) and assessment:
-                for label,value in [('Normalization status',assessment.get('status')),
-                                    ('Normalization review',assessment.get('reason')),
-                                    ('Original name',raw.get('original')),
-                                    ('Checked name',assessment.get('suggested_hgvs') or raw.get('normalization',{}).get('normalized_description')),
-                                    ('Genomic identity','Confirmed' if assessment.get('identity_confirmed') is True else 'Not confirmed'),
-                                    ('Checked genomic name',assessment.get('genomic_hgvs')),
-                                    ('Source genomic allele',assessment.get('source_genomic_query'))]:
-                    row=_vpm_field(sheet,row,label,value)
-    row+=1
-    internal_link(sheet.cell(row,1),'Overview',label='Overview')
-    internal_link(sheet.cell(row,4),'Quality',label='Quality')
-    sheet.freeze_panes='A5';sheet.print_area=f'A1:L{max(12,row)}'
+            row+=1
+    sheet.freeze_panes='A5';sheet.print_area=f'A1:L{max(5,row-1)}'
     return anchors
 
 
@@ -968,42 +967,14 @@ def _vpm_mtbp_sheet(workbook,analysis,full_reports):
     for path in full_reports.values():
         row=vpm_section(sheet,row,'MTBP – combined report')
         row=vpm_put_image(sheet,path,row,crop_top=mtbp_content_top(path))+1
-    internal_link(sheet.cell(row,1),'Overview',label='Overview')
     sheet.print_area=f'A1:L{row}'
-
-
-def _vpm_quality(workbook,analysis,variants):
-    """Preserve the complete Solide QC appendix using the reference palette."""
-    from copy import copy
-    _quality_sections(workbook,analysis,variants)
-    sheet=workbook['Quality'];vpm_base_sheet(sheet)
-    sheet.sheet_properties.tabColor=VPM_COLORS['muted']
-    # _quality_sections owns QC logic and readable row heights; only its
-    # inherited compact-report colors change in the VPM workbook.
-    for row in sheet:
-        for cell in row:
-            if cell.fill.fgColor.type=='rgb':
-                color=cell.fill.fgColor.rgb[-6:]
-                if color in {GREEN,PALE}:
-                    cell.fill=PatternFill('solid',fgColor=VPM_COLORS['navy'] if color==GREEN else VPM_COLORS['pale_blue'])
-            if cell.font.color and cell.font.color.type=='rgb' and cell.font.color.rgb[-6:] in {GREEN,INK}:
-                font=copy(cell.font);font.color=VPM_COLORS['navy'];cell.font=font
-    # Restore the QC table's widths after VPM sets its ordinary 13-unit base.
-    from openpyxl.utils import get_column_letter
-    for column,width in enumerate([13,30,16,12,43,12,18],1):sheet.column_dimensions[get_column_letter(column)].width=width
-    row=sheet.max_row+2
-    internal_link(sheet.cell(row,1),'Overview',label='Overview')
-    sheet.merge_cells(start_row=row+2,start_column=1,end_row=row+3,end_column=7)
-    sheet.cell(row+2,1,'Full source responses and original rows: right-click a worksheet tab and choose Unhide → Sources / Raw data.')
-    sheet.cell(row+2,1).alignment=Alignment(wrap_text=True,vertical='top')
-    sheet.print_area=f'A1:H{row+3}'
 
 
 def export_analysis(session:Session,analysis_id:str,directory:Path,include_evidence:bool=True)->ReportBundle:
     """Export one analysis in the current Archer/VPM single-workbook layout.
 
     Only the app's selected rows appear in Overview and variant tabs. All
-    supplied rows remain in the Quality and lossless source appendices.
+    supplied rows and full responses remain in hidden lossless source storage.
     """
     from collections import Counter
     from .analyses import analysis_scoped_session
@@ -1015,7 +986,7 @@ def export_analysis(session:Session,analysis_id:str,directory:Path,include_evide
     stem=re.sub(r'[^\w.-]','_',analysis.patient).strip('.')[:60] or 'source'
     profile=re.sub(r'[^\w.-]','_',analysis.profile)
     path=directory/f'{stem}_{profile}_{generated:%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:10]}_Report.xlsx'
-    workbook=Workbook();_workbook_marker(workbook);workbook.properties.version='5'
+    workbook=Workbook();_workbook_marker(workbook);workbook.properties.version='6'
     used={'overview','mtbp','quality','sources','raw data'}
     counts=Counter((variant.gene or 'Variant').casefold() for variant in selected)
     names={variant.id:_vpm_variant_name(variant,index,counts,used) for index,variant in enumerate(selected,1)}
@@ -1025,15 +996,16 @@ def export_analysis(session:Session,analysis_id:str,directory:Path,include_evide
         for variant in selected:
             anchors.update(_vpm_variant_sheet(workbook,names[variant.id],variant,scoped,include_evidence,full_reports))
         _vpm_mtbp_sheet(workbook,analysis,full_reports)
-        _vpm_quality(workbook,analysis,variants)
         _source_rows(workbook,variants,scoped,None,{},directory,analysis)
         sources=workbook['Sources']
-        for row in sources.iter_rows(min_row=6):
-            variant_id=sources.cell(row[0].row,10).value;source=sources.cell(row[0].row,3).value
-            anchor=anchors.get((variant_id,source))
-            if anchor:internal_link(sources.cell(row[0].row,7),anchor[0],anchor[1],label='Open evidence')
         sources.sheet_state='hidden'
         _raw_analysis_sheet(workbook,variants,analysis)
+        # Hidden provenance is literal storage, not an Excel structured table.
+        for sheet in (sources,workbook['Raw data']):
+            sheet.tables.clear();sheet.auto_filter.ref=None
+            for row in sheet:
+                for cell in row:
+                    if cell.hyperlink:cell.hyperlink=None
         _save_report_bundle(workbook,None,path,None)
     except Exception:
         workbook.close();raise
