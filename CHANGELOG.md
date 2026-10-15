@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0 — 15 October 2026
+
+- Check Mutalyzer normalization against independently validated hg19 source
+  REF/ALT, including padding, and canonical genomic sequence events. Offer an
+  explicit source/MANE transcript only after gene/version/event verification;
+  never choose the first equivalent transcript. Checked names still require
+  manual approval in Identity review. Conflicts block downstream searches.
+- Capture the actual SpliceAI query/settings and all basic-annotation transcript
+  scores. Compare the page response with validated API alleles, settings and
+  scores. Missing captures retain predictions and remain retryable. Preserve
+  the original intronic ±100 bp triage after genomic HGVS normalization.
+- Export the Archer/VPM single-workbook layout: Overview, a shared MTBP report,
+  source-ordered variant sheets, all-row Quality and hidden complete source data.
+  Include only Solide's databases. Keep source PNGs intact at readable width.
+- Port selected provider and Edge updates from Archer workstation c12a1b8,
+  including MTBP hidden identities/shared rows/recovery, provider capture
+  diagnostics, Franklin onboarding, COSMIC cache identity and strict ClinVar
+  allele-cache validation. Legacy uncertain MTBP gene matches require recheck.
+
 ## 0.6.0 — 14 October 2026
 
 - Keep each imported source in an independent, persistent analysis. OPA and Ion

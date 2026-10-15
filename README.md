@@ -2,8 +2,7 @@
 
 Local Windows desktop app for solid tumour variant review. Import Ion Reporter
 and Genexus exports, review row-level quality, select variants, collect database
-evidence through Edge, and export an Excel report with a separate evidence
-attachment for each analysis.
+evidence through Edge, and export an Archer/VPM-style Excel workbook for each analysis.
 
 ![Solide workspace with synthetic data](docs/images/solide.png)
 
@@ -50,8 +49,8 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 4. **Searches** selects databases and MTBP tissue (default **Other**). Save the
    session, sign in through Settings where needed, then run searches.
 5. Review source status and screenshots before exporting **Reports**. Export
-   creates the active analysis's report and, when evidence is available, a separate
-   Excel attachment. Clear **Include Excel attachment** for the compact report alone.
+   creates the active analysis's workbook, including its source screenshots.
+   Clear **Include source screenshots** to omit images while retaining source results.
 
 The **Analysis** selector applies across the app. Separate source files remain
 separate analyses even when their sample IDs match. Selection, quality, searches,
@@ -60,11 +59,23 @@ assessments; confirm any **Unassigned** report type in **Analysis details** befo
 Importing the same file again with the same sample, profile and assay reopens its
 existing analysis without discarding assessments or duplicating rows.
 
-The main workbook contains **Findings**, **Quality** and **Sources**. Complete
-original rows are retained in hidden **Raw data** (right-click a worksheet tab and
-choose Unhide). The attachment has an index, variant evidence sheets in VPM source
-order, and one copy of each combined MTBP report. Images stay out of the main
-report. [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+The workbook follows Archer/VPM: **Overview**, a shared **MTBP** report when
+available, individual variant sheets in source order, and **Quality**. Its source
+columns are Solide's eight databases. Complete responses and original rows stay
+in hidden **Sources** and **Raw data** (right-click a tab and choose Unhide).
+[Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+
+**Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
+required. **Use checked name** copies a sequence-verified suggestion and its source
+alleles into the form. Review them, tick **HGVS / mapping reviewed**, then save.
+Original imported names remain intact. A green normalizer result alone is not
+proof that an arbitrary transcript is the right reporting reference.
+
+SpliceAI runs automatically for selected intronic candidates within ±100 bp.
+Its prediction window is ±500 bp with masked scores on hg19; this window differs
+from the rule selecting candidates. The app captures the actual query/settings
+and all basic transcript scores. A failed screenshot retains the API result and
+appears as **Missing capture**, available through **Retry failed**.
 
 Sessions preserve source data, app assessments, reviewed HGVS and search history locally.
 Assessment is performed in the app. Excel is a versioned snapshot; edits to an

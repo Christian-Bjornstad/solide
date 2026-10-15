@@ -164,7 +164,7 @@ def test_mutalyzer_intronic_candidate_is_visible_but_not_approved(monkeypatch,tm
     assert not v.nomenclature_verified and not v.corrected_hgvs and v.coding=='c.254-1G>A'
 
 
-def test_spliceai_match_requires_complete_hg19_response():
+def test_spliceai_match_requires_complete_hg19_response(tmp_path):
     v=Variant(patient='SOURCE',gene='TP53',locus='chr17:7577609',ref='C',alt='T',assembly='GRCh37',selected=True)
     score={**{key:'0.0' for key in ('DS_AG','DS_AL','DS_DG','DS_DL')},
            **{key:0 for key in ('DP_AG','DP_AL','DP_DG','DP_DL')}}
@@ -173,6 +173,14 @@ def test_spliceai_match_requires_complete_hg19_response():
     evidence={'database':'SpliceAI','status':'found','fingerprint':v.fingerprint('Other'),
               'raw':{'query':response['variant'],'response':response}}
     session=Session(variants=[v])
+    assert assess_evidence(v,evidence,session).label=='Missing capture'
+    from PIL import Image,ImageDraw
+    capture=tmp_path/'spliceai.png';image=Image.new('RGB',(500,200),'white')
+    ImageDraw.Draw(image).rectangle((0,0,100,200),fill='green');image.save(capture)
+    evidence['raw']['screenshots']=[{'path':str(capture),'label':'Synthetic query settings'},
+                                  {'path':str(capture),'label':'Synthetic score table'}]
+    evidence['raw']['capture']={'query':response['variant'],'score_identity_confirmed':True,'dom_identity_confirmed':True,
+        'settings':{'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True}}
     assert assess_evidence(v,evidence,session).label=='Verified match'
     response['hg']=38
     assert assess_evidence(v,evidence,session).label=='Review required'

@@ -1,85 +1,93 @@
-# Analysis report contract — v0.6.0
+# Analysis report contract — v0.7.0
 
-One imported source is one analysis. OPA and Ion Torrent are explicit report
-profiles; assay describes the panel (such as Childhood or BRCA/HRR). Matching
-sample IDs never join separate sources. Each analysis has a persistent local ID,
-its own tissue and complete source metadata. Analysis IDs are not sent to databases.
-The active analysis controls rows, searches and export across the app.
+One original source is one persistent OPA or Ion Torrent analysis. Sample IDs do
+not merge separate sources. Selection, tissue, queries and export use the active
+analysis. Assay identifies the panel, for example Childhood or BRCA/HRR.
 
-Schema 1 sessions migrate by source, sample and assembly without changing row
-IDs, evidence, clinical fields or source cells. Unknown Genexus profiles are
-Unassigned until confirmed. Repeat imports with the same source hash, sample,
-profile and assay reuse the existing analysis. Different confirmation creates
-a distinct analysis; assembly conflicts require review.
+## Archer/VPM workbook
 
-## Compact report
+The default export is one versioned Excel workbook, following the pinned Archer
+patient writer's layout, colours, source order and original image placement:
 
-Each version has three visible worksheets:
+- **Overview**: navy title rows 1–2, sample/date rows 3–4, section row 6 and
+  filterable findings from row 8. Columns are Gene, HGVSc, HGVSp, Short evidence,
+  Comment, then MTBP, Franklin, ClinVar, OncoKB, COSMIC, BRCA Exchange, Mutalyzer
+  and SpliceAI. Solide's analysis context replaces Archer's app comment heading.
+- **MTBP**, when current evidence is available: one copy of each combined report,
+  linked from variant sheets. It follows Overview.
+- **Variant sheets**: compact source statuses/links, source screenshots, recorded
+  laboratory assessment and complete relevant source details. Only selected rows
+  get variant sheets; no Archer germline/artifact exclusion rules are applied.
+- **Quality**: all imported analysis rows, including unselected rows; OPA and Ion
+  retain their own coverage/CNV/RNA/identity sections and missing-data warnings.
+- Hidden **Sources** and **Raw data** retain all responses, metadata, original
+  ordered cells, source hashes and physical rows. Right-click a tab and choose
+  Unhide to inspect them. Large JSON uses exact literal chunks, not truncation.
 
-- **Findings**: selected variants, source transcript, variant, protein, AF, row
-  coverage, laboratory classification and decision. Full assessment notes,
-  reviewer and review date follow the table when recorded in the app.
-- **Quality**: all analysis rows, including unselected rows. OPA separates row
-  coverage, CNV, RNA expression imbalance and RNA exon variants. Ion includes
-  row coverage, supplied CNV, identity checks and coverage limitations.
-- **Sources**: variant/source match assessment, separate source assertion,
-  capture date and attachment link. Hidden columns retain response and provenance.
+Original screenshots are embedded intact at up to 1120 px width without shrinking
+long captures to a fixed height. Valid MTBP geometry crops only the display copy;
+its original PNG remains unchanged. Shared full reports are not repeated under
+variants. Stale, conflicting, incomplete or unreadable captures are excluded with
+an explicit state. The source assertions never become laboratory classifications.
 
-Complete original columns and every row remain in hidden **Raw data**. To read
-these, right-click a worksheet tab and choose **Unhide → Raw data**. Source order,
-blank values and literal text are preserved; apparent formulas are stored as text.
-Fields that Excel cannot store losslessly cause an explicit export error.
-Source file/hash/physical row identify each record. Source files remain intact.
+**Include source screenshots** controls images in the same workbook. Saving a new
+version preserves earlier exports; retry a save error without rerunning searches.
+The older compact exporter remains an internal compatibility API, not the default.
+No PDF is produced and Excel edits are not read back into the app.
 
-Coverage <500 applies to the exported row, not a whole gene. Missing numeric
-values remain Unknown. Missing categories are Not supplied, rather than passing
-QC. CNV=1 requires review. RNAExonVariant ABSENT is a reportable status, not a
-positive variant. Filtered exports state that QC covers supplied rows only.
-Source metadata does not establish missing run/chip metrics.
+## Mutalyzer normalization
 
-## Separate VPM-style attachment
+A normalizer result checks a name on its stated reference. It does not establish
+that an arbitrary equivalent transcript is the reporting transcript. The app
+independently normalizes the source hg19 REF/ALT including its VCF anchor, checks
+reference sequence, and compares canonical delins event models. It never uses the
+first returned equivalent as a transcript choice.
 
-**Include Excel attachment** creates another workbook when current source
-evidence exists. Its **Index** links to variant sheets, with sources ordered:
-MTBP, Franklin, ClinVar, OncoKB, COSMIC, BRCA Exchange, Mutalyzer and SpliceAI.
-Unsearched variants do not get empty evidence sheets. Each combined MTBP report
-is included once per original capture in its own sheet, linked from the variants.
+Explicit source/MANE candidates require matching gene, exact accession version
+and genomic event. With no source transcript, offer only the verified genomic
+name. Retain reference errors and mapper failures. Intronic mRNA EINTRONIC errors
+remain visible; a separate exact NC(source NM):c context may yield a checked name
+only after its returned hg19 reference and full genomic event agree.
 
-Only current, readable, eligible images are embedded. Outdated or conflicting
-results remain explicit source states. Tall captures are split into consecutive
-lossless segments and displayed at a readable width. Valid MTBP geometry can
-crop introductory material from the displayed copy; its original PNG stays
-unchanged and remains linked. Private, deleted MTBP portal links are omitted.
+Identity review shows Unchanged, Normalized, Conflict or Review required.
+**Use checked name** copies a verified candidate and alleles into the form; it does
+not save or approve. Review, tick HGVS / mapping reviewed, and save. A current
+Conflict or unapproved changed name blocks downstream database queries. Original
+source fields and previous results remain intact. Conflicting green normalizer
+panels cannot be embedded as accepted evidence.
 
-Reports and attachments have versioned, paired names. Relative links work while
-the two Excel files stay together. Stage both files, publish the attachment first
-and the main report last. Failed publication removes its new orphan attachment;
-prior exports are preserved. Retry save errors without repeating searches.
-Clearing the attachment option still exports the compact report and source ledger.
+## SpliceAI
 
-## Assessment and evidence
+Selected intronic candidates within ±100 bp trigger lookup, including when a
+reviewed genomic name no longer displays an intron offset. The scoring request
+uses hg19, basic annotations, distance 500 and masked scores. The 500 bp prediction
+window is distinct from the candidate-selection rule. Exonic variants are not
+implicitly assigned an intronic consequence by a different transcript.
 
-Classification, decision, reviewer and comments are edited in the app. Each
-change records prior values and review time. Excel is a snapshot; workbook edits
-are not read back. Database assertions never fill laboratory classification.
-No PDF output is created.
+Capture the actual website query/settings and every basic transcript's score rows,
+including REF/ALT columns. The page's returned allele, genome, mask, distance,
+transcripts and DS/DP scores must agree with the API response before capture.
+Missing or incompatible images retain the API prediction and expose Missing
+capture for retry. A verified identity is not a clinical splicing classification.
 
-Identity and tissue changes invalidate evidence. MTBP freshness additionally
-includes the local analysis context and complete selected analysis batch. Rerunning
-one MTBP result expands only that analysis. Old combined batches remain outdated
-until rerun, with evidence retained. Capture folders separate analyses and runs.
+## Data and MTBP preservation
 
-BRCA Exchange applies only to BRCA1/BRCA2. Mutalyzer suggestions and SpliceAI
-predictions require review. A found record alone does not prove an exact variant
-match. Unknown assemblies, conflicting alleles and incomplete responses cannot
-become verified evidence.
+Schema migration preserves original IDs, rows, evidence and assessments. Repeat
+imports of the same source hash/sample/profile/assay reuse the analysis; assembly
+conflicts require review. Apparent source formulas stay literal text. Raw fields
+that cannot fit losslessly in Excel cause explicit export errors.
 
-The account owner's MTBP policy remains: delete all existing reports before
-submission and delete each new report after local audit/capture. Verify deletion
-with delayed server checks; failed cleanup blocks a new submission. This includes
-reports created outside Solide. Uncertain submissions retain their exact remote
-report ID for reconciliation before resubmission.
+Coverage <500 describes the exported row, not whole-gene coverage. Missing values
+are Unknown and missing categories Not supplied. CNV=1 requires review;
+RNAExonVariant ABSENT is a reportable status rather than a positive finding.
+Clinical review remains in the app and database assertions remain separate.
 
-Laboratory files informed structure and preservation checks. Clinical source
-content is not published. VPM attachment concepts were checked against the
-[pinned Archer writer](https://github.com/Christian-Bjornstad/Archer-prosess/blob/b5f50c6e031ad9cfe8374e99d7e47b92c22872d1/src/archer_processor/reports/patient_excel.py).
+MTBP freshness includes the selected analysis batch and tissue. Legacy uncertain
+gene matches require recheck. The account owner's policy deletes all portal reports
+before submission and each new report after local capture/audit. An explicit
+rendered report count and list headings are required to confirm an empty account;
+a loading/error page with zero buttons is insufficient. Delete failures block a
+new batch, and uncertain submissions retain their exact report ID for recovery.
+
+Reference: [Archer writer at c12a1b8](https://github.com/Christian-Bjornstad/Archer-prosess/blob/c12a1b8bb840e33a41216148bc13be1e5c69682a/src/archer_processor/reports/patient_excel.py).
+Actual laboratory data and account material remain local and Git-ignored.

@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import uuid
+from urllib.parse import quote
 from functools import lru_cache
 from PIL.Image import DecompressionBombError
 from .models import Variant, Session
@@ -15,9 +16,10 @@ from .analyses import analysis_scoped_session, validate_analyses
 from .quality import review_reasons, MANE_TARGETS
 from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
 from .brca_exchange import brca_exchange_variant
+from .public_capture import capture_spliceai,capture_mutalyzer,spliceai_url
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
-from ._vendor.archer.services.evidence_audit import audit_digest
+from ._vendor.archer.services.evidence_audit import audit_digest,mtbp_legacy_matching_issue
 from ._vendor.archer.services.capture_validation import validate_capture
 
 SOURCES = ('ClinVar', 'Franklin', 'COSMIC', 'OncoKB', 'MTBP', 'Mutalyzer', 'SpliceAI', 'BRCA Exchange')
@@ -66,6 +68,9 @@ def assess_evidence(v, evidence, session):
     if not evidence_is_current(v,evidence,session.tissue_for(v),session):
         return EvidenceAssessment('Outdated','Variant, tissue or MTBP selection changed.',True)
     status=evidence.get('status','unknown');raw=evidence.get('raw',{})
+    if evidence.get('database')=='MTBP':
+        issue=mtbp_legacy_matching_issue(DatabaseEvidence('MTBP',status,raw=raw))
+        if issue:return EvidenceAssessment('Recheck required',issue,True)
     identity=raw.get('identity_verification',{})
     if status=='identity_mismatch' or identity.get('accepted') is False:
         return EvidenceAssessment('Identity mismatch','Returned identity does not match the request.',True)
@@ -79,9 +84,15 @@ def assess_evidence(v, evidence, session):
     if status=='not_applicable':return EvidenceAssessment('Not applicable',evidence.get('summary',''))
     if status=='found':
         source=evidence.get('database','')
-        if source in SOURCES[:5]:
+        if source in (*SOURCES[:5],'SpliceAI'):
             if not capture_available(evidence):
                 return EvidenceAssessment('Missing capture','Result screenshot is missing.',True)
+            if source=='SpliceAI':
+                capture=raw.get('capture',{})
+                if (capture.get('score_identity_confirmed') is not True or capture.get('dom_identity_confirmed') is not True
+                        or capture.get('query')!=raw.get('query') or len(raw.get('screenshots',[]))!=2
+                        or capture.get('settings')!={'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True}):
+                    return EvidenceAssessment('Missing capture','Recapture the verified query/settings and complete transcript scores.',True)
             if source=='MTBP' and not valid_capture(raw.get('patient_report_screenshot','')):
                 return EvidenceAssessment('Missing capture','Full MTBP report screenshot is missing.',True)
         if raw.get('query_basis')=='gene_cdna':
@@ -118,8 +129,8 @@ def build_search_plan(session, sources, mode='pending', chosen=None):
             evidence=v.evidence.get(source,{})
             assessment=assess_evidence(v,evidence,session)
             pending=not evidence_is_current(v,evidence,session.tissue_for(v),session) or evidence.get('status') not in COMPLETE
-            if evidence.get('status')=='found' and assessment.retryable:pending=True
-            failed=bool(evidence) and (evidence.get('status') in FAILED or assessment.label in {'Missing capture','Identity mismatch'})
+            if assessment.retryable:pending=True
+            failed=bool(evidence) and (evidence.get('status') in FAILED or assessment.label in {'Missing capture','Identity mismatch','Recheck required'})
             if mode=='all' or (mode=='chosen' and (v.id,source) in chosen) or (mode=='pending' and pending) or (mode=='failed' and failed):
                 plan.add((v.id,source))
     mtbp_groups={_analysis_group(v) for v in selected if (v.id,'MTBP') in plan}
@@ -139,6 +150,13 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
     if ',' in v.gene or ',' in v.transcript:
         raise ValueError('Multiple genes / transcripts: resolve variant identity before searching.')
     reasons = review_reasons(v)
+    normalization=v.evidence.get('Mutalyzer',{})
+    if normalization.get('fingerprint')==v.fingerprint(normalization.get('tissue','Other')):
+        assessment=normalization.get('raw',{}).get('nomenclature_assessment',{})
+        if assessment.get('status')=='Conflict':
+            raise ValueError('Mutalyzer found a conflict between the variant name and source alleles. Review identity before searching.')
+        if assessment.get('status')=='Normalized' and not v.nomenclature_verified:
+            raise ValueError('Review the normalized Mutalyzer name before database searches.')
     if 'Mutalyzer' in reasons and not v.nomenclature_verified:
         raise ValueError('Review delins / complex variants in Mutalyzer before database searches.')
     if 'MANE' in reasons:
@@ -261,6 +279,8 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
             continue
         scoped=scopes[group]
         patient=variants[0].patient
+        analysis_root=root/'analyses'/hashlib.sha256(group[1].encode()).hexdigest()[:16] if group[0]=='analysis' else root
+        patient_directory=analysis_root/hashlib.sha256(patient.encode()).hexdigest()[:16]/uuid.uuid4().hex[:12]
         # Nomenclature comes first. Normalization candidates require human acceptance.
         for source in ('Mutalyzer', 'SpliceAI', 'BRCA Exchange'):
             if source not in sources:
@@ -293,8 +313,18 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             summary += '\nGRCh37 genomic candidate (review required): ' + candidate
                         if data.get('genomic_normalization_issue'):
                             summary += '\n' + data['genomic_normalization_issue']
+                        assessment=data.get('nomenclature_assessment',{})
+                        if assessment:summary='Nomenclature: '+assessment['status']+'\n'+assessment.get('reason','')+'\n'+summary
+                        if ((not errors and norm.get('normalized_description')) or
+                                (assessment.get('identity_confirmed') and data.get('contextual_normalization'))):
+                            try:
+                                captured=capture_mutalyzer(data,patient_directory/'Mutalyzer',background=background,
+                                                          checkpoint=control.checkpoint,progress=progress)
+                                if captured:data.update(screenshots=captured['screenshots'],capture=captured)
+                            except BrowserReviewCancelled:raise
+                            except Exception as exc:data['capture_issue']=str(exc)
                         store(v,source,{'status':status,'summary':summary,'raw':data,
-                                      'url':'https://mutalyzer.nl/normalizer/'})
+                                      'url':'https://mutalyzer.nl/normalizer/'+quote(data.get('original',''),safe='')})
                     elif source == 'BRCA Exchange':
                         query_record(v,source)
                         store(v,source,brca_exchange_variant(v))
@@ -306,9 +336,18 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                         finally:
                             last_splice=time.monotonic()
                         scores=data.get('response',{}).get('scores',[])
+                        if scores:
+                            try:
+                                captured=capture_spliceai(data,patient_directory/'SpliceAI',background=background,
+                                                         checkpoint=control.checkpoint,progress=progress)
+                                data.update(screenshots=captured['screenshots'],capture=captured)
+                            except BrowserReviewCancelled:raise
+                            except Exception as exc:
+                                data['capture_issue']=str(exc);progress('SpliceAI: scores retained; screenshot requires retry')
                         store(v,source,{'status':'found' if scores else 'needs_review',
                                       'summary':spliceai_summary(data)+'\nGRCh37, distance=500, mask=1.',
-                                      'raw':data,'url':'https://spliceailookup.broadinstitute.org/'})
+                                      'raw':data,'url':spliceai_url(data)})
+                except BrowserReviewCancelled:raise
                 except ValueError as exc:
                     store(v,source,{'status':'needs_review','summary':str(exc)})
                 except Exception as exc:
@@ -316,8 +355,6 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
         service=BrowserReviewService(profile_root=Path.home()/'.solide'/'browser_profiles',
             mtbp_cancer_type=scoped.tissue_for(variants[0]), stop_requested=control.stopped.is_set,
             pause_wait=control.checkpoint, browser_background=background, **(credentials or {}))
-        analysis_root=root/'analyses'/hashlib.sha256(group[1].encode()).hexdigest()[:16] if group[0]=='analysis' else root
-        patient_directory=analysis_root/hashlib.sha256(patient.encode()).hexdigest()[:16]/uuid.uuid4().hex[:12]
         # Run each provider as one patient batch, retaining every returned checkpoint.
         for source in SOURCES[:5]:
             control.checkpoint()

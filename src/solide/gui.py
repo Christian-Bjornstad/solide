@@ -321,6 +321,16 @@ class MainWindow(QMainWindow):
         identity_row.addWidget(QLabel('Gene'));identity_row.addWidget(self.gene_edit,1)
         identity_row.addWidget(QLabel('Transcript'));identity_row.addWidget(self.transcript_edit,2)
         form.addRow(identity)
+        self.normalization_status=QLabel('Run Mutalyzer to check the variant name.');self.normalization_status.setWordWrap(True)
+        form.addRow('Mutalyzer',self.normalization_status)
+        self.normalization_choices=QComboBox();self.normalization_choices.setAccessibleName('Checked normalization candidates')
+        self.normalization_choices.setMinimumContentsLength(18)
+        self.normalization_choices.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.use_normalization_btn=self.button('Use checked name',self.use_normalization)
+        self.use_normalization_btn.setEnabled(False)
+        suggestions=QWidget();suggestion_row=QHBoxLayout(suggestions);suggestion_row.setContentsMargins(0,0,0,0)
+        suggestion_row.addWidget(self.normalization_choices,1);suggestion_row.addWidget(self.use_normalization_btn)
+        form.addRow('Suggestion',suggestions)
         form.addRow('Reviewed HGVS',self.hgvs_edit)
         form.addRow('Reviewed hg19 REF/ALT',self.genomic_edit)
         self.verified_check=QCheckBox('HGVS / mapping reviewed')
@@ -378,9 +388,9 @@ class MainWindow(QMainWindow):
         self.report_analysis_label=QLabel('Import an analysis first');self.report_analysis_label.setWordWrap(True);row.addWidget(self.report_analysis_label,1)
         self.report_btn=self.button('Export Excel',self.export,True);row.addWidget(self.report_btn)
         row.addWidget(self.button('Open folder',self.open_report_folder))
-        self.report_btn.setToolTip('Export the active analysis as a compact report and an optional VPM-style Excel attachment.')
-        self.include_evidence=QCheckBox('Include Excel attachment');self.include_evidence.setChecked(True)
-        self.include_evidence.setToolTip('Source screenshots and complete evidence are saved in a separate workbook beside the report.')
+        self.report_btn.setToolTip('Export the active analysis using the Archer / VPM workbook layout.')
+        self.include_evidence=QCheckBox('Include source screenshots');self.include_evidence.setChecked(True)
+        self.include_evidence.setToolTip('Include MTBP and variant source images in the same Excel workbook.')
         form.addWidget(self.include_evidence)
         form.addLayout(row);layout.addWidget(box)
         self.report_log=QPlainTextEdit();self.report_log.setReadOnly(True);layout.addWidget(self.report_log,1)
@@ -472,6 +482,8 @@ class MainWindow(QMainWindow):
                        self.account_username,self.account_password,self.login_source,
                        self.analysis_selector,self.analysis_edit_btn,self.include_evidence):
             widget.setEnabled(not value)
+        self.normalization_choices.setEnabled(not value)
+        self.use_normalization_btn.setEnabled(not value and self.normalization_choices.count()>0)
         self.save_btn.setEnabled(not value)
 
     def launch(self,worker):
@@ -615,12 +627,15 @@ class MainWindow(QMainWindow):
     def show_variant(self,index,*args):
         if not index.isValid():
             self.current_variant=None;self.detail.clear();self.raw_detail.clear()
+            self.normalization_choices.clear();self.use_normalization_btn.setEnabled(False)
+            self.normalization_status.setText('Select a variant to review its name.')
             for edit in (self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit):edit.clear()
             self.verified_check.setChecked(False);return
         source=self.proxy.mapToSource(index);v=self.variant_model.variants[source.row()];self.current_variant=v
         self.gene_edit.setText(v.gene);self.transcript_edit.setText(v.transcript)
         self.hgvs_edit.setText(v.corrected_hgvs);self.verified_check.setChecked(v.nomenclature_verified)
         self.genomic_edit.setText(v.controlled_genomic)
+        self.show_normalization(v)
         lines=[f'{v.gene}  {v.protein}',f'DNA: {v.coding}',f'Transcript: {v.transcript or "Missing"}',
                f'Assembly: {v.assembly}   Locus: {v.locus or "Missing"}',
                f'Allele frequency: {v.af_percent if v.af_percent is not None else "Missing"} %   Coverage: {v.coverage if v.coverage is not None else "Missing"}',
@@ -635,6 +650,36 @@ class MainWindow(QMainWindow):
         self.detail.setPlainText('\n'.join(lines))
         self.raw_detail.setPlainText(json.dumps({'source':v.source_file,'row':v.source_row,'assembly':v.assembly,
             'review_needed':review_reasons(v),'raw_data':v.raw,'evidence':v.evidence},ensure_ascii=False,indent=2,default=str))
+
+    def show_normalization(self,v):
+        self.normalization_choices.clear();self.use_normalization_btn.setEnabled(False)
+        evidence=v.evidence.get('Mutalyzer',{})
+        if not evidence:
+            self.normalization_status.setText('Run Mutalyzer to check the variant name.');return
+        if not evidence_is_current(v,evidence,self.session.tissue_for(v),self.session):
+            self.normalization_status.setText('Outdated — rerun Mutalyzer for the current identity.');return
+        assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
+        self.normalization_status.setText(assessment.get('status','Review required')+' · '+assessment.get('reason',evidence.get('summary','')))
+        if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict':return
+        candidates=assessment.get('candidates',[])
+        for candidate in candidates:
+            description=candidate.get('description','')
+            if description:self.normalization_choices.addItem(description,description)
+        preferred=self.normalization_choices.findData(assessment.get('suggested_hgvs'))
+        if preferred>=0:self.normalization_choices.setCurrentIndex(preferred)
+        self.use_normalization_btn.setEnabled(self.normalization_choices.count()>0 and not self.active)
+
+    def use_normalization(self):
+        if self.active or not self.current_variant:return
+        v=self.current_variant;evidence=v.evidence.get('Mutalyzer',{})
+        if not evidence_is_current(v,evidence,self.session.tissue_for(v),self.session):return
+        assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
+        choice=self.normalization_choices.currentData()
+        if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict' or not choice:return
+        if choice not in {candidate.get('description') for candidate in assessment.get('candidates',[])}:return
+        self.hgvs_edit.setText(choice);self.genomic_edit.setText(assessment.get('source_genomic_query',''))
+        self.verified_check.setChecked(False)
+        self.banner.setText('Checked name copied. Review the HGVS and alleles, then approve and save.')
 
     def refresh_variant_row(self,variant):
         # Values changed; row layout did not. A bare layoutChanged notification
@@ -668,6 +713,7 @@ class MainWindow(QMainWindow):
         v.controlled_genomic=genomic
         self.session.history.append({'event':'identity_review','id':v.id,'time':datetime.now().astimezone().isoformat(),'hgvs':hgvs})
         self.mark_dirty();self.refresh_variant_row(v);self.refresh_evidence();self.auto_save()
+        self.show_normalization(v)
         self.banner.setText('Review saved. Previous evidence may be outdated.')
 
     def show_tissue(self,*args):
@@ -934,6 +980,7 @@ class MainWindow(QMainWindow):
             if previous:self.session.history.append({'event':'evidence_replaced','run_id':self.run_id,'id':id,'source':source,'evidence':copy.deepcopy(previous)})
             self.run_history_saved.add(key)
         e['run_id']=self.run_id;v.evidence[source]=e;self.dirty=True
+        if self.current_variant is v and source=='Mutalyzer':self.show_normalization(v)
         if 'provisional_status' not in e.get('raw',{}):
             self.run_done.add(key);self.progress.setValue(len(self.run_done))
             assessment=assess_evidence(v,e,self.session)

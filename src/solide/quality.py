@@ -49,8 +49,10 @@ def review_reasons(v: Variant) -> list[str]:
     reasons = []
     if 'delins' in v.coding.lower() or kind_key(v.kind) == 'complex':
         reasons.append('Mutalyzer')
-    coding=v.corrected_hgvs or v.coding
-    if any(1 <= int(n) <= 100 for n in re.findall(r'\d+[+-](\d+)', coding)):
+    # Genomic normalization can remove the c. intron offset from the reviewed
+    # name. Retain the original transcript context for splicing triage.
+    coding=' '.join(filter(None,[v.coding,v.corrected_hgvs]))
+    if any(1 <= int(n) <= 100 for n in re.findall(r'\d+[+-](\d+)',coding)):
         reasons.append('SpliceAI')
     target = MANE_TARGETS.get(v.gene)
     if target and (target[0] in v.transcript or not v.transcript):

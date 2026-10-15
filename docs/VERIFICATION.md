@@ -1,6 +1,51 @@
-# Verification — Solide v0.6.0
+# Verification — Solide v0.7.0
 
-Dates: 9–14 October 2026. Local Windows / Python 3.12.
+Dates: 9–15 October 2026. Local Windows / Python 3.12.
+
+## Normalization and Archer/VPM reports — 15 October 2026
+
+- **560 tests passed** in 39.90 seconds. Source compilation and diff checks
+  passed. Tests cover full anchored source alleles, canonical genomic delins
+  identity, exact transcript versions, intronic genomic context, rejected
+  normalization conflicts, SpliceAI settings/score/capture agreement and legacy
+  MTBP identity rechecks. Provider regression tests exercise the selected
+  c12a1b8 Archer ports; local Edge DOM smoke checks passed separately.
+- Live Mutalyzer checks confirmed that the two supplied EGFR screenshot names
+  describe the same GRCh37 sequence event. The short-transcript UTR name is
+  not automatically an error. The app never selects the first equivalent
+  transcript. Actual EGFR deletion, KIT delins, BRCA1 and intronic PTEN queries
+  retain their original source fields and complete validation responses.
+- PTEN c.254-1G>A initially produces the mRNA-reference EINTRONIC response.
+  A separate exact NC(source NM):c request validates the genomic event; the
+  original error remains in the evidence. Its checked candidate is offered
+  for manual approval, not applied automatically.
+- Actual SpliceAI capture shows hg19, basic annotations, masked predictions,
+  distance 500, REF/ALT and all six transcript score groups. The page response,
+  DOM settings, coordinates, transcripts and DS/DP values match the separately
+  validated API response. Two real PNGs are retained; missing capture is retryable.
+- Fresh authenticated browser batches covered two supplied analysis formats:
+  14 source results across ClinVar, Franklin, COSMIC, OncoKB and MTBP. Six MTBP
+  variant results completed as five Review matches and one No match. Remote
+  reports were deleted and a separate authenticated rendered-list check
+  confirmed zero reports. An unavailable/error list cannot be treated as empty.
+- Generated **13 actual version-5 workbooks**: twelve separate TSV analyses
+  plus the complete 3,204-row OPA worksheet. Independent read-only audit passed
+  all **3,280 original rows**, selected order, QC exceptions, full metadata and
+  JSON round trips, **272 pixel-exact embedded images** and **426 local links**.
+  Existing valid source captures retain their actual dates; this image total
+  includes earlier captures and does not represent 272 fresh database requests.
+- Read-only artifact rendering produced **155 worksheet ranges**, with further
+  full-width header checks. OPA/Ion overviews, QC exceptions, source statuses,
+  source images and normalization details were visually inspected. Default
+  export is now one Archer/VPM workbook; separate evidence attachments belong
+  to the older compatibility exporter.
+- Actual GUI renders at 1050×700 / 18 px and 1440×940 verify readable Settings
+  and a scrolling Identity review with the checked PTEN candidate. Laboratory
+  classifications, reviewers and approvals remain unfilled. Technical source
+  checks do not constitute laboratory validation or a clinical interpretation.
+- Public-path/history and vault checks found no raw inputs, sessions, generated
+  reports, private identifiers, keys or passwords in publishable paths. Actual
+  data, screenshots and audit artifacts stay local and Git-ignored.
 
 ## Analysis reports — 14 October 2026
 

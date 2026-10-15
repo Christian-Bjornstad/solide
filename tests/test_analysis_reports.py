@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw
 import pytest
 
 from solide.models import Analysis, Session, Variant
-from solide.reporting import export_analysis, export_patient
+from solide.reporting import export_analysis_compact as export_analysis, export_patient
 
 
 def analysis_session(*variants, profile='OPA', analysis_id='opa'):
