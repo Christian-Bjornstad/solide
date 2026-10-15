@@ -1,6 +1,36 @@
-# Verification — Solide v0.7.1
+# Verification — Solide v0.8.0
 
 Dates: 9–15 October 2026. Local Windows / Python 3.12.
+
+## Sample-based import and separate workflow pages — 15 October 2026
+
+- **575 tests passed** in 36.71 seconds. New tests cover analysis detection,
+  explicit-assay precedence, filename/metadata OUM extraction and conflicts,
+  missing-ID validation, rejection of multiple named samples, isolated sample
+  switching/selection, lossless candidate filtering, sample renaming and the
+  separate Import/Variants/Searches/Settings navigation and clearing a previous
+  sample's gene filter when a new file is imported.
+- The actual GUI imported all twelve supplied TSVs separately again: seven
+  Ion Reporter exports (69 rows) and five Genexus/OPA exports (seven rows).
+  All 76 rows and original hashes are retained. Seven files provided detectable
+  OUM metadata; five did not. For technical testing only, missing bindings use
+  explicit Unbound aliases, not fabricated OUM identifiers or inferred patients.
+- Every import dialog preselected the expected profile. Missing sample IDs had
+  disabled Add sample actions; import details remain available on demand.
+  Selection and active sample IDs were verified through the persistent sample list.
+- The full 3,204-row OPA source shows 25 candidate rows in the default view.
+  Show all rows restores exactly 3,204 rows, without changing the source model.
+  Original all-row QC remains available separately from candidate selection.
+- Reviewed compact 1050×700 and full-size GUI captures for Import, Variants,
+  Searches and Settings, plus actual missing-OUM and populated import dialogs.
+  File actions live on Import; source/tissue configuration folds out on Searches,
+  leaving readable result rows and Excel export together. Public previews are
+  synthetic; actual records and captures remain local and ignored by Git.
+- Confirmed Archer's workstation branch still resolves to c12a1b8 and examined
+  its current navigation. Reused its staged workflow approach while retaining
+  Solide's per-file variant selection and the requested separate Import page.
+- The two older supplied archives contain workbooks/PDFs rather than additional
+  raw TSVs. docs/RAW_DATA.md records what can and cannot be inferred from them.
 
 ## Clean attachments and Excel repair regression — 15 October 2026
 

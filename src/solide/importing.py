@@ -10,6 +10,25 @@ from .models import Variant, ImportResult
 SOLIDE_REPORT_IDENTIFIER = 'solide:variant-review-report'
 
 
+def oum_numbers(value: str) -> list[str]:
+    return list(dict.fromkeys(match.upper() for match in re.findall(
+        r'(?<![A-Za-z0-9])\d{2}OUM(?:\d+|X+)(?![A-Za-z0-9])',str(value),re.I)))
+
+
+def detect_analysis(headers,metadata):
+    """Separate the report schema from the assay; explicit assay metadata wins."""
+    workflow=' '.join(str(metadata.get(key) or '') for key in ('workflowName','assayName'))
+    columns={name.casefold() for name in headers}
+    if re.search(r'oncomine\s+precision|\bopa\b',workflow,re.I):
+        return 'OPA','Oncomine Precision Assay','Oncomine Precision Assay is named in the file.'
+    if {'genes','transcript'}<=columns:
+        assay='Childhood' if 'childhood' in workflow.lower() else 'BRCA/HRR' if re.search(r'brca|hrr',workflow,re.I) else workflow.strip() or 'Unknown'
+        return 'Ion Torrent',assay,'Ion Reporter columns: Genes and Transcript.'
+    if 'gene' in columns and columns & {'nuc change','nucleotide change'}:
+        return 'OPA','Oncomine Precision Assay','Genexus/OPA column layout. Confirm the assay in Import details if different.'
+    return 'Unassigned',workflow.strip() or 'Unknown','Analysis type is not established by these columns. Choose it in Import details.'
+
+
 def text(value) -> str:
     return '' if value is None else str(value).strip()
 
@@ -185,4 +204,13 @@ def load_file(path: Path) -> ImportResult:
     if metadata.get('analysisName') and hint and hint not in metadata['analysisName']:
         warnings.append('Sample metadata differs from the analysis name. Confirm sample identity.')
     warnings.append('Coverage describes individual exported rows, not whole-gene coverage.')
-    return ImportResult(variants, metadata, warnings, assembly, hint)
+    sample_metadata=text(metadata.get('sampleNames') or metadata.get('sampleName'))
+    if len(oum_numbers(sample_metadata))>1 or len([part for part in re.split(r'[,;]',sample_metadata) if part.strip()])>1:
+        raise ValueError('Multiple samples are named in this export. Choose one original sample TSV per import.')
+    candidates=list(dict.fromkeys(oum_numbers(sample_metadata)+oum_numbers(hint)+oum_numbers(path.stem)))
+    if len(candidates)>1:
+        warnings.append('Conflicting OUM numbers in the source and filename. Confirm the correct sample before import.')
+        hint=''
+    elif candidates:hint=candidates[0]
+    profile,assay,reason=detect_analysis(variants[0].raw['_columns'],metadata)
+    return ImportResult(variants,metadata,warnings,assembly,hint,profile,assay,reason,candidates)

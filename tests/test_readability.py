@@ -34,7 +34,7 @@ def test_text_size_setting_applies_without_clipping_progress(tmp_path):
         assert window.detail.font().pixelSize()==18
         assert window.variant_table.verticalHeader().defaultSectionSize()>=42
         window.progress.setTextVisible(True);window.progress.setFormat('%v / %m');window.progress.setRange(0,20)
-        window.nav.setCurrentRow(1)
+        window.nav.setCurrentRow(2)
         assert window.progress.height()>=window.progress.fontMetrics().height()+10
         def luminance(colour):
             channels=[channel/255 for channel in (colour.red(),colour.green(),colour.blue())]

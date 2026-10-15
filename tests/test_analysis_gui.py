@@ -19,7 +19,7 @@ def setup_window(tmp_path):
     window.config_path = tmp_path / 'config.json'
     window.session_path = tmp_path / 'review.solide.json'
     window.output_dir.setText(str(tmp_path))
-    window.refresh()
+    window.refresh();window.nav.setCurrentRow(1)
     return app, window, first, second
 
 

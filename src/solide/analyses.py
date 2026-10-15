@@ -119,3 +119,17 @@ def analysis_scoped_session(session: Session, analysis_id: str) -> Session:
     tissue = session.tissues.get(analysis.id, session.tissue(analysis.patient))
     return Session(variants=variants, analyses=[analysis],
         tissues={analysis.patient: tissue, analysis.id: tissue}, history=session.history)
+
+
+def rename_analysis_sample(session: Session, analysis_id: str, patient: str) -> None:
+    """Change only this file's binding; preserve source identity and other samples."""
+    validate_analyses(session)
+    if not isinstance(patient,str) or not patient.strip():raise ValueError('Enter the OUM / sample ID.')
+    analysis=session.analysis(analysis_id);rows=session.analysis_variants(analysis_id)
+    if analysis.patient==patient.strip():return
+    if rows:session.tissues[analysis.id]=session.tissue_for(rows[0])
+    previous=analysis.patient;analysis.patient=patient.strip()
+    for variant in rows:variant.patient=analysis.patient
+    session.history.append({'event':'sample_identity_changed','analysis_id':analysis.id,
+                            'previous_sample':previous,'sample':analysis.patient})
+    validate_analyses(session)

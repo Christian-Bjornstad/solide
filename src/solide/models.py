@@ -55,6 +55,10 @@ class ImportResult:
     warnings: list[str] = field(default_factory=list)
     assembly: str = 'Unknown'
     sample_hint: str = ''
+    profile: str = 'Unassigned'
+    assay: str = 'Unknown'
+    detection_reason: str = ''
+    sample_candidates: list[str] = field(default_factory=list)
 
 
 @dataclass

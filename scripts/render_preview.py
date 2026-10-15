@@ -44,7 +44,7 @@ second.evidence['Franklin']={'database':'Franklin','status':'timeout','summary':
 ensure_analyses(window.session)
 for analysis in window.session.analyses:
     analysis.profile='OPA';analysis.assay='Oncomine Precision Assay'
-window.refresh();window.nav.setCurrentRow(0);window.show();app.processEvents()
+window.refresh();window.nav.setCurrentRow(1);window.show();app.processEvents()
 window.variant_table.selectRow(0);app.processEvents()
 out=Path('artifacts/solide-preview.png').resolve();out.parent.mkdir(exist_ok=True)
 window.grab().save(str(out));print(out)
@@ -52,7 +52,7 @@ for index in range(window.nav.count()):
     window.nav.setCurrentRow(index);app.processEvents()
     window.grab().save(str(out.parent/f'page-{index}.png'))
 window.resize(1050,700)
-for index in (0,1,3):
+for index in (0,1,2,3):
     window.nav.setCurrentRow(index);app.processEvents()
     window.grab().save(str(out.parent/f'compact-{index}.png'))
 window.dirty=False;window.close()

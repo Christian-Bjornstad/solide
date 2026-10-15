@@ -38,26 +38,29 @@ written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
 
 ## Workflow
 
-1. **Workspace** imports TSV or Genexus XLSX; confirm sample ID, assembly, report
-   type (**OPA** or **Ion Torrent**) and assay (for example Childhood or BRCA/HRR).
-   For the normal workflow, import one original TSV, review/select its rows,
-   run the chosen sources and export its Excel report. Extract delivery ZIPs
-   locally first; nested folders are packaging rather than an assay format.
-2. Switch the workspace view to **Quality** to check every imported row, including unselected rows.
-3. **Variants** lets you filter, select and review variant identity. **Assess variant**
-   saves classification, report decision, reviewer and assessment notes in the app.
-4. **Searches** selects databases and MTBP tissue (default **Other**). Save the
-   session, sign in through Settings where needed, then run searches.
-5. Review source status and screenshots before exporting **Reports**. Export
-   creates the active analysis's workbook, including its source screenshots.
-   Clear **Include source screenshots** to omit images while retaining source results.
+1. **Import** opens one original TSV per sample. The file's columns and assay
+   metadata suggest Ion Torrent or OPA. Confirm the detected OUM number, or enter
+   one if missing. Import details contains assay and genome controls; hg19 is the
+   workspace default when the file omits it. Unknown or conflicting inputs need
+   confirmation. The file overview lists Sample, Analysis, File and Rows.
+2. **Variants** uses the sample list on the left. Select that file's variants,
+   review identity and record assessments in the app. The normal view omits
+   unselected absent Genexus calls and CNV/RNA quality rows; **Show all rows**
+   restores them. The **Quality** workspace view always checks all imported rows.
+3. **Searches** contains **Sources / tissue**, database runs, results, selective
+   retries and **Export Excel**. MTBP tissue defaults to Other. Match states and
+   source assertions stay distinct from laboratory classifications.
+4. **Settings** contains local storage, text size and database accounts.
 
-The **Analysis** selector applies across the app. Separate source files remain
-separate analyses even when their sample IDs match. Selection, quality, searches,
-tissue and exports use the active analysis. Older sessions retain their rows and
-assessments; confirm any **Unassigned** report type in **Analysis details** before export.
-Importing the same file again with the same sample, profile and assay reopens its
-existing analysis without discarding assessments or duplicating rows.
+Each original file is an independent sample analysis; no patient is assumed to
+have both OPA and Ion Torrent testing. The same OUM in different files does not
+merge their variants, tissue, searches or reports. **Sample details** can correct
+an OUM binding without modifying source cells or another analysis. **Open review**
+resumes a saved session; **Save** keeps app assessments locally. Excel edits are
+not read back. Original source IDs, rows, metadata and hashes remain retained.
+
+See [Understanding the supplied raw data](docs/RAW_DATA.md) for the difference
+between filtered variant TSVs, full workbooks and reviewed templates.
 
 The workbook follows Archer/VPM: **Overview**, a shared **MTBP** report when
 available and individual variant sheets with source screenshots. Its source

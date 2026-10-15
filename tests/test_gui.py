@@ -26,9 +26,9 @@ def test_english_navigation_and_identity_review_tab():
     app=QApplication.instance() or QApplication([])
     window=MainWindow()
     assert [window.nav.item(i).text() for i in range(window.nav.count())]==[
-        'Workspace','Searches','Reports','Settings']
+        'Import','Variants','Searches','Settings']
     window.session=Session(variants=[Variant(patient='DEMO',gene='EGFR',coverage=499,source_row=8)])
-    window.refresh();window.nav.setCurrentRow(0);window.show();app.processEvents()
+    window.refresh();window.nav.setCurrentRow(1);window.show();app.processEvents()
     window.variant_table.selectRow(0);app.processEvents()
     assert 'Source:' in window.detail.toPlainText()
     assert window.qc_model.item(0,3).text()=='Failed'

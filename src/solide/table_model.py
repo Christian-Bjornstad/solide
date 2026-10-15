@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal, QSortFilterProxyModel
 from PyQt6.QtGui import QColor
-from .quality import review_reasons, qc_flags
+from .quality import review_reasons, qc_flags, kind_key
 
 COLUMNS=[('Selected','selected'),('Patient / sample','patient'),('Gene','gene'),('Transcript','transcript'),
          ('Coding','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
@@ -9,7 +9,7 @@ COLUMNS=[('Selected','selected'),('Patient / sample','patient'),('Gene','gene'),
 
 class VariantProxy(QSortFilterProxyModel):
     def __init__(self):
-        super().__init__();self.patient='';self.query=''
+        super().__init__();self.patient='';self.query='';self.candidates_only=False
         self.setSortRole(Qt.ItemDataRole.UserRole)
 
     def set_filters(self,patient,query):
@@ -19,6 +19,9 @@ class VariantProxy(QSortFilterProxyModel):
     def filterAcceptsRow(self,row,parent):
         v=self.sourceModel().variants[row]
         if self.patient and self.patient!=v.patient:return False
+        if self.candidates_only and not v.selected:
+            if kind_key(v.kind) in {'cnv','rnaexontiles','rnaexonvariant','fusion'}:return False
+            if v.platform=='Genexus' and v.call.strip().upper()=='ABSENT':return False
         values=[v.patient,v.gene,v.transcript,v.coding,v.protein,v.kind,v.call,v.locus,v.comment]
         return self.query in ' '.join(str(x) for x in values).casefold()
 

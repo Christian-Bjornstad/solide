@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0 — 15 October 2026
+
+- Split file import from variant review: Import, Variants, Searches and Settings.
+  Add a persistent per-file sample list and a concise imported-file overview.
+  Keep source configuration collapsible and Excel export beside search results.
+- Detect the supplied Ion Reporter and Genexus/OPA layouts, respect explicit OPA
+  metadata, and identify Childhood/BRCA panels. Unknown formats require a choice.
+- Extract OUM numbers from metadata or filenames. Missing or conflicting IDs
+  require input; reject exports naming multiple samples. Correct sample bindings
+  without changing source rows, evidence or other imported analyses.
+- Default the variant view to candidates while retaining all raw rows and all-row
+  quality checks. Absent Genexus calls and quality rows can be shown on demand.
+
 ## 0.7.1 — 15 October 2026
 
 - Simplify both attachment profiles to Overview and source screenshots; remove
