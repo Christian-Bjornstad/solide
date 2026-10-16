@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.1 — 16 October 2026
+
+- Complete the MolStat-style install/start launchers for Python FELLES via Ivanti
+  and ordinary Windows Python. Check the project layout, preserve special paths,
+  forward local startup arguments and retain actionable error messages/exit codes.
+- Isolate pasted FELLES startup from the host interpreter's command-line flags.
+  Add SOLIDE_INSTALLER.cmd as an installer alias and concise installation docs.
+- Test actual CMD routes and encoded clipboard commands with harmless stand-ins;
+  verification does not install packages or launch institutional applications.
+
 ## 0.8.0 — 15 October 2026
 
 - Split file import from variant review: Import, Variants, Searches and Settings.

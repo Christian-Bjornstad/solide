@@ -25,16 +25,20 @@ python start_python_felles.py --session "C:\path\review.solide.json"
 
 For the laboratory's **Python FELLES** environment:
 
-1. Save the project in a permanent folder.
-2. Run `SOLIDE_INSTALL.cmd`, paste the copied command into Python FELLES and press Enter.
-3. Close Python FELLES, run `SOLIDE_START.cmd` and paste its start command.
-4. Choose an approved local workspace folder in **Settings**.
+1. Keep the complete project in a permanent folder.
+2. Double-click **SOLIDE_INSTALL.cmd**. Paste the copied command into Python FELLES
+   with Ctrl+V and press Enter.
+3. When installation finishes, close Python FELLES.
+4. Double-click **SOLIDE_START.cmd** and paste its command to start the app.
+5. Choose a local workspace folder in **Settings**.
 
-The shared-interpreter bootstrap follows
-[MolStat](https://github.com/Christian-Bjornstad/MolStat). Ivanti app ID 15694
-and Python FELLES compatibility must be checked on the work PC. Installation
-uses the user's site-packages without administrator rights. Failure logs are
-written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
+The launchers follow [MolStat](https://github.com/Christian-Bjornstad/MolStat):
+Ivanti opens Python FELLES (app ID 15694), and installation/startup run inside
+that interpreter. On ordinary Windows PCs the same launchers use local Python.
+SOLIDE_INSTALLER.cmd also delegates to the installer. Errors stay visible, with
+bootstrap diagnostics in `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
+See [installation instructions](docs/INSTALLATION.md) for interpreter selection
+and direct Python commands. Work-PC Ivanti/access must be checked there.
 
 ## Workflow
 

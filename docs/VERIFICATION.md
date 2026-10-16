@@ -1,6 +1,22 @@
-# Verification — Solide v0.8.0
+# Verification — Solide v0.8.1
 
-Dates: 9–15 October 2026. Local Windows / Python 3.12.
+Dates: 9–16 October 2026. Local Windows / Python 3.12.
+
+## Windows install/start launchers — 16 October 2026
+
+- **581 tests passed** in 72.45 seconds on Windows. Eight bootstrap/launcher
+  checks cover in-process install/start, failure exit codes, isolated shared-host
+  arguments, local CMD argument forwarding, special-character paths and actual
+  execution of the encoded pasted Python command against harmless stand-ins.
+- Reused MolStat's Python FELLES / Ivanti startup pattern after reading its
+  current tracked launchers and confirming its remote branch revision. Solide
+  keeps its own Python minimum and local profile/configuration paths.
+- Both CMD launchers check the complete project layout, prefer Ivanti app 15694
+  when available, and otherwise use the same local interpreter selection. Paths
+  are absolute and encoded for clipboard transfer. Added the installer alias.
+- No packages were installed, no Ivanti process was opened, and the real clipboard
+  was not changed by the tests. Institutional Ivanti/access still needs the work
+  PC. Source compilation, diff checks and the public-data audit passed.
 
 ## Sample-based import and separate workflow pages — 15 October 2026
 
