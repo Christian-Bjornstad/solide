@@ -23,7 +23,9 @@ def test_mtbp_preflight_empties_all_report_types(tmp_path, monkeypatch):
     class Buttons:
         def count(self): return len(names)
         def nth(self, i): return SimpleNamespace(get_attribute=lambda _: names[i])
-    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda _: Buttons())
+    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda selector:
+        SimpleNamespace(inner_text=lambda:f'Currently, {len(names)} Reports Report ID Entry Date Cancer Type Delete')
+        if selector=='body' else Buttons())
     def delete(current, name):
         assert current is page
         names.remove(name)
@@ -38,7 +40,9 @@ def test_failed_mtbp_deletion_blocks_new_submission(tmp_path, monkeypatch):
     service = BrowserReviewService(profile_root=tmp_path)
     monkeypatch.setattr(service, "_goto_with_retries", lambda *args, **kwargs: None)
     buttons = SimpleNamespace(count=lambda: 1, nth=lambda _: SimpleNamespace(get_attribute=lambda _: "old"))
-    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda _: buttons)
+    page = SimpleNamespace(url="https://mtbp.org/patients/", locator=lambda selector:
+        SimpleNamespace(inner_text=lambda:'Currently, 1 Reports Report ID Entry Date Cancer Type Delete')
+        if selector=='body' else buttons)
     monkeypatch.setattr(service, "_delete_mtbp_report", lambda *args: {"status": "failed", "message": "still listed"})
     with pytest.raises(RuntimeError, match="no new analysis"):
         service._cleanup_stale_mtbp_reports(page, progress=None)

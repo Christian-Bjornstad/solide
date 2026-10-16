@@ -14,11 +14,13 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLa
     QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
     QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
+from .analyses import add_analysis,ensure_analyses,analysis_scoped_session,rename_analysis_sample
+from .import_dialog import SampleImportDialog
 from .importing import load_file
 from .quality import qc_flags, review_reasons
 from .session import save_session, load_session, atomic_write
 from .table_model import VariantTableModel, VariantProxy
-from .reporting import export_patient, STATUS
+from .reporting import export_analysis, STATUS
 from .evidence import SOURCES, QueueControl, run_queue, evidence_is_current
 from .evidence import build_search_plan, assess_evidence, source_applies
 from .assessment import AssessmentDialog,save_assessment
@@ -45,11 +47,18 @@ QListWidget#nav { background: transparent; border: 0; outline: 0; }
 QListWidget#nav::item { padding: 13px 10px; margin: 4px 0; border-radius: 8px; }
 QListWidget#nav::item:selected { background: #425B3D; color: white; font-weight: 600; }
 QListWidget#nav::item:hover:!selected { background: #EDF3E8; }
+QListWidget#samples { background: transparent; border: 0; outline: 0; }
+QListWidget#samples::item { padding: 8px; margin: 3px 0; border-radius: 8px; }
+QListWidget#samples::item:selected { background: #EAF0E6; color: #243128; }
+QListWidget#samples::item:hover { background: #F2F5EF; }
+QListWidget#samples:focus { border: 1px solid #425B3D; }
+QLabel#emptyState { background: white; padding: 30px; border: 1px solid #DEE5DA; border-radius: 10px; }
 QPushButton { background: white; border: 1px solid #CBD5C5; border-radius: 8px; padding: 10px 16px; min-height: 22px; }
 QPushButton:hover { background: #EAF0E6; border-color: #425B3D; }
 QPushButton:focus, QLineEdit:focus, QComboBox:focus, QTableView:focus { border: 2px solid #425B3D; }
 QPushButton#primary { background: #425B3D; color: white; border-color: #425B3D; font-weight: 600; }
 QPushButton#primary:hover { background: #34492F; }
+QPushButton#primary:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
 QPushButton:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
 QLineEdit, QComboBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
 QLineEdit { placeholder-text-color: #596454; }
@@ -130,7 +139,7 @@ class MainWindow(QMainWindow):
             for font in ('segoeui.ttf','segoeuib.ttf'):
                 path=Path('C:/Windows/Fonts')/font
                 if path.is_file():QFontDatabase.addApplicationFont(str(path))
-        self.session=Session();self.session_path=None;self.dirty=False
+        self.session=Session();self.session_path=None;self.dirty=False;self.active_analysis_id=None
         self.active=None;self.workers=[];self.control=None;self.current_variant=None
         self.run_plan=set();self.run_done=set();self.run_id=None;self.run_started=0;self.run_state='Idle'
         self.run_history_saved=set()
@@ -155,9 +164,14 @@ class MainWindow(QMainWindow):
             '<path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/>',
             '<circle cx="12" cy="12" r="4"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M5 19l2-2M17 7l2-2"/>']
         self.nav.setIconSize(QSize(20,20))
-        for label,path in zip(['Workspace','Searches','Reports','Settings'],[icons[i] for i in (2,3,4,5)]):
+        for label,path in zip(['Import','Variants','Searches','Settings'],[icons[i] for i in (0,2,3,5)]):
             self.nav.addItem(QListWidgetItem(navigation_icon(path),label))
-        rail_layout.addWidget(self.nav,1)
+        self.nav.setFixedHeight(230);rail_layout.addWidget(self.nav)
+        samples_heading=QLabel('SAMPLES');samples_heading.setObjectName('railNote');rail_layout.addWidget(samples_heading)
+        self.sample_list=QListWidget();self.sample_list.setObjectName('samples');self.sample_list.setWordWrap(True)
+        self.sample_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sample_list.setAccessibleName('Imported samples');self.sample_list.currentRowChanged.connect(self.choose_sample)
+        rail_layout.addWidget(self.sample_list,1)
         footer=QLabel('LOCAL WORKSPACE\nGRCh37 / hg19');footer.setObjectName('railNote');rail_layout.addWidget(footer)
         horizontal.addWidget(rail)
         body=QWidget();vertical=QVBoxLayout(body);vertical.setContentsMargins(28,25,28,18)
@@ -165,6 +179,12 @@ class MainWindow(QMainWindow):
         self.title=QLabel('Import');self.title.setObjectName('title');header.addWidget(self.title);header.addStretch()
         self.summary=QLabel('No files imported');self.summary.setObjectName('subtitle');header.addWidget(self.summary)
         vertical.addLayout(header)
+        analysis_row=QHBoxLayout()
+        self.analysis_selector=QComboBox();self.analysis_selector.setAccessibleName('Active analysis')
+        self.analysis_selector.hide();self.analysis_context=QLabel('Open a TSV to start.');self.analysis_context.setWordWrap(True);analysis_row.addWidget(self.analysis_context,1)
+        self.analysis_edit_btn=self.button('Sample details',self.edit_analysis);analysis_row.addWidget(self.analysis_edit_btn)
+        vertical.addLayout(analysis_row)
+        self.analysis_selector.currentIndexChanged.connect(self.change_analysis)
         self.pages=QStackedWidget();vertical.addWidget(self.pages,1)
         self.banner=QLabel('Ready');self.banner.setObjectName('status');self.banner.setWordWrap(True)
         vertical.addWidget(self.banner);horizontal.addWidget(body,1)
@@ -190,16 +210,97 @@ class MainWindow(QMainWindow):
         for page in original:self.pages.removeWidget(page)
         workspace=QWidget();layout=QVBoxLayout(workspace);layout.setContentsMargins(0,18,0,0)
         row=QHBoxLayout()
-        for button in (self.import_btn,self.open_btn,self.save_btn):row.addWidget(button)
-        row.addStretch();self.workspace_view=QComboBox();self.workspace_view.addItems(['Variants','Quality'])
+        row.addWidget(self.button('Import files',lambda:self.nav.setCurrentRow(0)))
+        row.addStretch();self.next_btn=self.button('Search selected →',lambda:self.nav.setCurrentRow(2));row.addWidget(self.next_btn)
+        self.workspace_view=QComboBox();self.workspace_view.addItems(['Variants','Quality'])
         self.workspace_view.setAccessibleName('Workspace view');row.addWidget(self.workspace_view);layout.addLayout(row)
         self.workspace_pages=QStackedWidget();self.workspace_pages.addWidget(original[2]);self.workspace_pages.addWidget(original[1])
+        for page in (original[2],original[1]):page.layout().setContentsMargins(0,0,0,0)
         self.workspace_view.currentIndexChanged.connect(self.workspace_pages.setCurrentIndex)
-        layout.addWidget(self.workspace_pages,1);self.pages.addWidget(workspace)
-        for page in original[3:]:self.pages.addWidget(page)
+        self.empty_state=QLabel('Open one TSV per sample.\nIon Torrent or OPA is detected from the file.');self.empty_state.setObjectName('emptyState');self.empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter);self.empty_state.setWordWrap(True);layout.addWidget(self.empty_state,1)
+        layout.addWidget(self.workspace_pages,1);self.pages.addWidget(original[0]);self.pages.addWidget(workspace)
+        searches=original[3];search_layout=searches.layout()
+        export_row=QHBoxLayout();export_row.addWidget(self.report_btn);export_row.addWidget(self.include_evidence)
+        export_row.addStretch();self.exports_toggle=self.button('Exported files',lambda:None)
+        self.exports_toggle.setCheckable(True);export_row.addWidget(self.exports_toggle)
+        export_row.addWidget(self.button('Open folder',self.open_report_folder));search_layout.addLayout(export_row)
+        self.report_log.setMaximumHeight(110);search_layout.addWidget(self.report_log)
+        self.report_log.hide();self.exports_toggle.toggled.connect(self.report_log.setVisible)
+        self.report_analysis_label.setParent(searches);self.report_analysis_label.hide()
+        original[4].deleteLater()
+        self.pages.addWidget(searches);self.pages.addWidget(original[5])
         # Import history is recorded in the common log; retain the widget for the
         # existing import summary handler, without another navigation destination.
-        self.import_log.setParent(workspace);self.import_log.hide();original[0].deleteLater()
+        self.import_log.hide()
+
+    def active_session(self):
+        if self.active_analysis_id:
+            return analysis_scoped_session(self.session,self.active_analysis_id)
+        return Session()
+
+    def analysis_label(self,analysis):
+        assay=f' · {analysis.assay}' if analysis.assay not in {'Unknown',analysis.profile} else ''
+        label=f'{analysis.profile}{assay} · {analysis.patient}'
+        peers=[a for a in self.session.analyses if (a.profile,a.assay,a.patient)==(analysis.profile,analysis.assay,analysis.patient)]
+        if len(peers)>1:
+            label+=f' · {Path(analysis.source_file).name or "Source"} · {peers.index(analysis)+1}'
+        return label
+
+    def choose_sample(self,row):
+        if self.active or row<0:return
+        item=self.sample_list.item(row)
+        index=self.analysis_selector.findData(item.data(Qt.ItemDataRole.UserRole))
+        if index>=0:
+            self.analysis_selector.setCurrentIndex(index)
+            if self.nav.currentRow()==0:self.nav.setCurrentRow(1)
+
+    def refresh_samples(self):
+        self.sample_list.blockSignals(True);self.sample_list.clear()
+        for analysis in self.session.analyses:
+            rows=self.session.analysis_variants(analysis.id)
+            item=QListWidgetItem(f'{analysis.patient}\n{analysis.profile}')
+            item.setData(Qt.ItemDataRole.UserRole,analysis.id)
+            item.setToolTip(self.analysis_label(analysis)+'\n'+Path(analysis.source_file).name)
+            item.setSizeHint(QSize(0,max(76,self.font().pixelSize()*3+24)));self.sample_list.addItem(item)
+            if analysis.id==self.active_analysis_id:self.sample_list.setCurrentItem(item)
+        self.sample_list.blockSignals(False)
+
+    def change_analysis(self,*args):
+        if self.active:return
+        self.active_analysis_id=self.analysis_selector.currentData()
+        self.search.blockSignals(True);self.search.clear();self.search.blockSignals(False)
+        self.refresh()
+
+    def edit_analysis(self):
+        if self.active or not self.active_analysis_id:return
+        analysis=self.session.analysis(self.active_analysis_id)
+        dialog=QDialog(self);dialog.setWindowTitle('Analysis details');dialog.resize(580,300)
+        form=QFormLayout(dialog);patient=QLineEdit(analysis.patient);patient.setObjectName('sampleId');form.addRow('OUM / sample ID',patient)
+        form.addRow('Source format',QLabel(analysis.source_format or 'Unknown'))
+        source=QLabel(Path(analysis.source_file).name or 'Unknown');source.setWordWrap(True);form.addRow('Source file',source)
+        profile=QComboBox();profile.addItems(['Unassigned','OPA','Ion Torrent']);profile.setCurrentText(analysis.profile)
+        form.addRow('Report type',profile)
+        assay=QLineEdit(analysis.assay if analysis.assay!='Unknown' else '');assay.setPlaceholderText('Assay name')
+        form.addRow('Assay',assay);form.addRow('Assembly',QLabel(analysis.assembly))
+        buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Save|QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        try:rename_analysis_sample(self.session,analysis.id,patient.text())
+        except ValueError as exc:self.notify_error(str(exc));return
+        analysis.profile=profile.currentText();analysis.assay=assay.text().strip() or 'Unknown'
+        self.session.history.append({'event':'analysis_review','analysis_id':analysis.id,
+            'profile':analysis.profile,'assay':analysis.assay,'time':datetime.now().astimezone().isoformat()})
+        self.mark_dirty();self.refresh();self.auto_save()
+
+    def confirmed_analysis(self):
+        if not self.active_analysis_id:
+            self.notify_error('Import an analysis first.');return None
+        analysis=self.session.analysis(self.active_analysis_id)
+        if analysis.profile=='Unassigned':
+            self.edit_analysis()
+            if analysis.profile=='Unassigned':
+                self.banner.setText('Choose OPA or Ion Torrent in Analysis details.');return None
+        return analysis
 
     def page(self):
         w=QWidget();layout=QVBoxLayout(w);layout.setContentsMargins(0,18,0,0)
@@ -212,17 +313,19 @@ class MainWindow(QMainWindow):
 
     def build_import(self):
         layout=self.page()
-        box=QGroupBox('Import files');content=QVBoxLayout(box)
-        info=QLabel('Ion Reporter or Genexus · TSV / XLSX');info.setWordWrap(True)
+        box=QGroupBox('Open a sample');content=QVBoxLayout(box)
+        info=QLabel('One original TSV per sample. Ion Torrent or OPA is detected automatically.');info.setWordWrap(True)
         content.addWidget(info)
         row=QHBoxLayout()
-        self.import_btn=self.button('Import files…',self.import_files,True);row.addWidget(self.import_btn)
-        self.open_btn=self.button('Open session…',self.open_session);row.addWidget(self.open_btn)
-        self.save_btn=self.button('Save session…',self.save_dialog);row.addWidget(self.save_btn);row.addStretch()
+        self.import_btn=self.button('Open TSV…',self.import_files,True);row.addWidget(self.import_btn)
+        self.open_btn=self.button('Open review…',self.open_session);row.addWidget(self.open_btn)
+        self.save_btn=self.button('Save',self.save_dialog);row.addWidget(self.save_btn);row.addStretch()
         content.addLayout(row);layout.addWidget(box)
-        self.import_log=QPlainTextEdit();self.import_log.setReadOnly(True)
-        self.import_log.setPlaceholderText('Import history');layout.addWidget(self.import_log,1)
-        self.import_btn.setToolTip('Confirm patient / sample ID and assembly for each file. Variant-only exports may omit CNV and RNA quality data.')
+        self.import_model=QStandardItemModel(0,4);self.import_model.setHorizontalHeaderLabels(['Sample','Analysis','File','Rows'])
+        self.import_table=table(self.import_model);self.import_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.import_table.doubleClicked.connect(self.open_imported_sample);layout.addWidget(self.import_table,1)
+        self.import_log=QPlainTextEdit();self.import_log.setReadOnly(True);self.import_log.hide()
+        self.import_btn.setToolTip('One original TSV per sample. Detect the analysis and confirm or add its OUM number.')
 
     def build_quality(self):
         layout=self.page()
@@ -237,10 +340,11 @@ class MainWindow(QMainWindow):
         layout=self.page();row=QHBoxLayout()
         self.search=QLineEdit();self.search.setPlaceholderText('Gene, HGVS or sample…')
         self.search.setAccessibleName('Search variants');row.addWidget(self.search,1)
-        self.patient_filter=QComboBox();self.patient_filter.setAccessibleName('Filter patient');row.addWidget(self.patient_filter)
+        self.patient_filter=QComboBox();self.patient_filter.setAccessibleName('Filter patient');self.patient_filter.hide()
         row.addWidget(self.button('Select visible',lambda:self.select_visible(True)))
         row.addWidget(self.button('Clear visible',lambda:self.select_visible(False)))
-        layout.addLayout(row)
+        self.show_all_rows=QCheckBox('Show all rows');self.show_all_rows.setToolTip('Include absent calls and CNV/RNA quality rows. Original data are always retained.');self.show_all_rows.toggled.connect(self.apply_filter)
+        row.addWidget(self.show_all_rows);layout.addLayout(row)
         self.variant_model=VariantTableModel();self.variant_model.changed.connect(self.mark_dirty)
         self.proxy=VariantProxy();self.proxy.setSourceModel(self.variant_model)
         self.search.textChanged.connect(self.apply_filter);self.patient_filter.currentTextChanged.connect(self.apply_filter)
@@ -266,6 +370,16 @@ class MainWindow(QMainWindow):
         identity_row.addWidget(QLabel('Gene'));identity_row.addWidget(self.gene_edit,1)
         identity_row.addWidget(QLabel('Transcript'));identity_row.addWidget(self.transcript_edit,2)
         form.addRow(identity)
+        self.normalization_status=QLabel('Run Mutalyzer to check the variant name.');self.normalization_status.setWordWrap(True)
+        form.addRow('Mutalyzer',self.normalization_status)
+        self.normalization_choices=QComboBox();self.normalization_choices.setAccessibleName('Checked normalization candidates')
+        self.normalization_choices.setMinimumContentsLength(18)
+        self.normalization_choices.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.use_normalization_btn=self.button('Use checked name',self.use_normalization)
+        self.use_normalization_btn.setEnabled(False)
+        suggestions=QWidget();suggestion_row=QHBoxLayout(suggestions);suggestion_row.setContentsMargins(0,0,0,0)
+        suggestion_row.addWidget(self.normalization_choices,1);suggestion_row.addWidget(self.use_normalization_btn)
+        form.addRow('Suggestion',suggestions)
         form.addRow('Reviewed HGVS',self.hgvs_edit)
         form.addRow('Reviewed hg19 REF/ALT',self.genomic_edit)
         self.verified_check=QCheckBox('HGVS / mapping reviewed')
@@ -276,21 +390,29 @@ class MainWindow(QMainWindow):
         form_scroll.setWidget(form_box);tabs.addTab(form_scroll,'Identity review')
         split.addWidget(detail);detail.setMinimumHeight(160);split.setChildrenCollapsible(False)
         split.setStretchFactor(0,3);split.setStretchFactor(1,2);split.setSizes([460,240]);split.setHandleWidth(3);layout.addWidget(split,1)
-        self.selection_summary=QLabel();layout.addWidget(self.selection_summary)
+        self.selection_summary=QLabel();self.selection_summary.hide()
 
     def build_evidence(self):
-        layout=self.page();top=QHBoxLayout()
+        layout=self.page()
+        options_row=QHBoxLayout();self.sources_toggle=self.button('Sources / tissue…',lambda:None)
+        self.sources_toggle.setCheckable(True);options_row.addWidget(self.sources_toggle)
+        self.sources_summary=QLabel();self.sources_summary.setWordWrap(True);options_row.addWidget(self.sources_summary,1)
+        layout.addLayout(options_row)
+        self.source_options=QWidget();options=QVBoxLayout(self.source_options);options.setContentsMargins(0,0,0,0)
+        self.source_options.hide();self.sources_toggle.toggled.connect(self.source_options.setVisible)
+        layout.addWidget(self.source_options);top=QHBoxLayout()
         self.tissue_patient=QComboBox();self.tissue_patient.currentTextChanged.connect(self.show_tissue)
         self.tissue=QComboBox();self.tissue.setEditable(True);self.tissue.addItems(['Other','Lung','Breast','Colorectal'])
-        top.addWidget(QLabel('Patient'));top.addWidget(self.tissue_patient)
+        self.tissue_patient.hide()
         top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
-        top.addWidget(self.button('Save tissue',self.save_tissue));layout.addLayout(top)
+        top.addWidget(self.button('Save tissue',self.save_tissue));options.addLayout(top)
         self.source_checks={};sources=QGridLayout()
         for index,source in enumerate(SOURCES):
             check=QCheckBox(source);check.setChecked(source in self.config.get('sources',['ClinVar','MTBP','Franklin','Mutalyzer','SpliceAI']))
             if source=='BRCA Exchange':check.setToolTip('Runs only for BRCA1 and BRCA2. Exact hg19 alleles or versioned HGVS are checked.')
             sources.addWidget(check,index//4,index%4);self.source_checks[source]=check
-        layout.addLayout(sources)
+        options.addLayout(sources)
+        self.tissue.currentTextChanged.connect(self.update_sources_summary)
         row=QHBoxLayout();self.run_btn=self.button('Run searches',self.start_queue,True);row.addWidget(self.run_btn)
         self.run_btn.setText('Run pending')
         self.run_btn.setToolTip('Run new, incomplete or outdated searches. Completed matches and no-match results are preserved.')
@@ -301,8 +423,8 @@ class MainWindow(QMainWindow):
         self.rerun_btn=rerun_menu.addAction('Selected results');self.rerun_btn.triggered.connect(self.rerun_selected)
         self.rerun_all_btn=rerun_menu.addAction('All selected variants');self.rerun_all_btn.triggered.connect(lambda:self.start_queue('all'))
         self.rerun_menu_btn=self.button('Rerun…',lambda:None);self.rerun_menu_btn.setMenu(rerun_menu);row.addWidget(self.rerun_menu_btn);row.addStretch()
-        self.retry_btn.setToolTip('Retry failed searches only. MTBP regenerates the complete selected patient batch.')
-        self.rerun_btn.setToolTip('Rerun highlighted result rows, including completed searches. MTBP regenerates the complete selected patient batch.')
+        self.retry_btn.setToolTip('Retry failed searches in the active analysis. MTBP regenerates its complete selected batch.')
+        self.rerun_btn.setToolTip('Rerun highlighted results in the active analysis. MTBP regenerates its complete selected batch.')
         layout.addLayout(row)
         self.progress=QProgressBar();self.progress.setRange(0,1);self.progress.setValue(0);self.progress.setTextVisible(False);layout.addWidget(self.progress)
         self.result_counts=QLabel();layout.addWidget(self.result_counts)
@@ -315,14 +437,23 @@ class MainWindow(QMainWindow):
         self.evidence_table=table(self.evidence_model);self.evidence_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.evidence_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.evidence_table.doubleClicked.connect(lambda index:self.inspect_evidence());layout.addWidget(self.evidence_table,2)
-        for check in self.source_checks.values():check.toggled.connect(self.refresh_evidence)
+        for check in self.source_checks.values():check.toggled.connect(self.refresh_evidence);check.toggled.connect(self.update_sources_summary)
+
+    def update_sources_summary(self,*args):
+        selected=[source for source,check in self.source_checks.items() if check.isChecked()]
+        self.sources_summary.setText(f'{len(selected)} sources · MTBP: {self.tissue.currentText()}')
+        self.sources_summary.setToolTip(', '.join(selected))
 
     def build_report(self):
         layout=self.page();box=QGroupBox('Export reports');form=QVBoxLayout(box)
-        row=QHBoxLayout();self.report_patient=QComboBox();row.addWidget(self.report_patient,1)
+        row=QHBoxLayout();self.report_patient=QComboBox();self.report_patient.hide()
+        self.report_analysis_label=QLabel('Import an analysis first');self.report_analysis_label.setWordWrap(True);row.addWidget(self.report_analysis_label,1)
         self.report_btn=self.button('Export Excel',self.export,True);row.addWidget(self.report_btn)
         row.addWidget(self.button('Open folder',self.open_report_folder))
-        self.report_btn.setToolTip('Versioned Excel snapshot: app assessments, selected variants, all-row QC, source evidence and original data.')
+        self.report_btn.setToolTip('Export the active analysis using the Archer / VPM workbook layout.')
+        self.include_evidence=QCheckBox('Include source screenshots');self.include_evidence.setChecked(True)
+        self.include_evidence.setToolTip('Include MTBP and variant source images in the same Excel workbook.')
+        form.addWidget(self.include_evidence)
         form.addLayout(row);layout.addWidget(box)
         self.report_log=QPlainTextEdit();self.report_log.setReadOnly(True);layout.addWidget(self.report_log,1)
         self.report_log.setPlaceholderText('Exported files')
@@ -377,8 +508,14 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.button('Open log folder',self.open_log_folder),0,Qt.AlignmentFlag.AlignLeft)
         layout.addStretch()
 
+    def open_imported_sample(self,index):
+        id=self.import_model.item(index.row(),0).data(Qt.ItemDataRole.UserRole)
+        self.analysis_selector.setCurrentIndex(self.analysis_selector.findData(id));self.nav.setCurrentRow(1)
+
     def navigate(self,index):
         self.pages.setCurrentIndex(index);self.title.setText(self.nav.item(index).text())
+        self.analysis_context.setVisible(index!=0);self.analysis_edit_btn.setVisible(index!=0)
+        self.refresh_counts()
 
     def apply_appearance(self,*args):
         pixels=text_pixels(self.text_size.currentData())
@@ -389,6 +526,8 @@ class MainWindow(QMainWindow):
         for view in (self.variant_table,self.qc_table,self.evidence_table):
             view.verticalHeader().setDefaultSectionSize(max(40,pixels+24))
         self.progress.setMinimumHeight(max(32,pixels+16))
+        self.nav.setFixedHeight(sum(self.nav.sizeHintForRow(i) for i in range(self.nav.count()))+10)
+        for i in range(self.sample_list.count()):self.sample_list.item(i).setSizeHint(QSize(0,max(76,pixels*3+24)))
         self.fit_table_headers()
 
     def fit_table_headers(self):
@@ -410,9 +549,13 @@ class MainWindow(QMainWindow):
                        self.assessment_btn,self.variant_table,self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit,
                        self.verified_check,self.output_dir,self.background,self.tissue,
                        self.retry_btn,self.rerun_btn,self.rerun_all_btn,self.rerun_menu_btn,self.account_save_btn,self.account_clear_btn,
-                       self.account_username,self.account_password,self.login_source):
+                       self.account_username,self.account_password,self.login_source,
+                       self.analysis_selector,self.analysis_edit_btn,self.include_evidence,self.sample_list,self.next_btn,self.show_all_rows,self.source_options):
             widget.setEnabled(not value)
+        self.normalization_choices.setEnabled(not value)
+        self.use_normalization_btn.setEnabled(not value and self.normalization_choices.count()>0)
         self.save_btn.setEnabled(not value)
+        self.next_btn.setEnabled(not value and any(v.selected for v in self.active_session().variants))
 
     def launch(self,worker):
         self.active=worker;self.workers.append(worker);self.busy(True)
@@ -424,6 +567,7 @@ class MainWindow(QMainWindow):
         if isinstance(worker,EvidenceWorker):
             self.run_timer.stop();self.update_run_status()
             self.session.history.append({'event':'run_end','run_id':self.run_id,'state':self.run_state,
+                'analysis_id':self.active_analysis_id,
                 'completed':len(self.run_done),'total':len(self.run_plan),'time':datetime.now().astimezone().isoformat()})
             self.dirty=True;self.auto_save()
         else:
@@ -436,7 +580,7 @@ class MainWindow(QMainWindow):
             self.banner.setText('Unsaved changes')
 
     def import_files(self):
-        paths,_=QFileDialog.getOpenFileNames(self,'Import files','','Variant files (*.tsv *.xlsx)')
+        paths,_=QFileDialog.getOpenFileNames(self,'Import files','','TSV files (*.tsv);;Genexus workbooks (*.xlsx)')
         if not paths:return
         def read():
             results=[]
@@ -455,30 +599,26 @@ class MainWindow(QMainWindow):
                 message=f'Import failed: {error}'
                 self.import_log.appendPlainText(message);self.record_activity(message)
                 continue
-            dialog=QDialog(self);dialog.setWindowTitle('Confirm sample');dialog.resize(620,330)
-            form=QFormLayout(dialog);info=QLabel(f'{Path(path).name}\n{len(result.variants)} rows. Confirm the sample below.');info.setWordWrap(True);form.addRow(info)
-            patient=QLineEdit(result.sample_hint);form.addRow('Patient / sample ID',patient)
-            assembly=QComboBox();assembly.addItems(['GRCh37','GRCh38','Unknown'])
-            assembly.setCurrentText(result.assembly if result.assembly!='Unknown' else 'GRCh37');form.addRow('Assembly',assembly)
-            warnings=QLabel('\n'.join(result.warnings));warnings.setWordWrap(True);form.addRow(warnings)
-            buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
-            buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);form.addRow(buttons)
+            dialog=SampleImportDialog(result,Path(path),self)
+            patient,assembly,profile,assay=dialog.patient,dialog.assembly,dialog.profile,dialog.assay
             if dialog.exec()!=QDialog.DialogCode.Accepted:skipped+=1;continue
             if not patient.text().strip():
                 failed+=1;self.notify_error('Enter a patient / sample ID.');continue
-            existing={v.id for v in self.session.variants}
-            added=0
-            for v in result.variants:
-                if v.id in existing:continue
-                v.patient=patient.text().strip();v.assembly=assembly.currentText()
-                self.session.variants.append(v);added+=1
+            before=len(self.session.variants)
+            try:
+                analysis=add_analysis(self.session,result,patient.text().strip(),assembly.currentText(),profile.currentText(),assay.text().strip() or 'Unknown')
+            except ValueError as exc:
+                failed+=1;self.notify_error(str(exc));self.record_activity(f'Import failed: {exc}');continue
+            self.active_analysis_id=analysis.id;added=len(self.session.variants)-before
             imported+=1;rows_added+=added
             self.session.history.append({'event':'import','time':datetime.now().astimezone().isoformat(),
-                                         'file':path,'rows':added,'patient':patient.text().strip()})
+                                         'file':path,'rows':added,'patient':patient.text().strip(),'analysis_id':analysis.id,
+                                         'detected_profile':result.profile,'confirmed_profile':profile.currentText(),
+                                         'detection_reason':result.detection_reason,'sample_candidates':result.sample_candidates})
             self.import_log.appendPlainText(f'{added} rows imported; {len(result.variants)-added} duplicates skipped.\n'+'\n'.join(result.warnings))
             self.record_activity(f'Imported {added} rows; {len(result.variants)-added} duplicates skipped')
             for warning in result.warnings:self.record_activity(warning)
-        if imported:self.mark_dirty();self.refresh()
+        if imported:self.search.clear();self.mark_dirty();self.refresh();self.nav.setCurrentRow(1)
         if imported:
             message=f'Imported {rows_added:,} rows from {imported} files'
             if failed:message+=f' · {failed} failed (see Log)'
@@ -488,10 +628,33 @@ class MainWindow(QMainWindow):
         self.banner.setText(message)
 
     def refresh(self):
-        self.variant_model.set_variants(self.session.variants)
+        ensure_analyses(self.session)
+        self.analysis_selector.blockSignals(True);self.analysis_selector.clear()
+        for analysis in self.session.analyses:self.analysis_selector.addItem(self.analysis_label(analysis),analysis.id)
+        index=self.analysis_selector.findData(self.active_analysis_id)
+        if index<0:index=0 if self.session.analyses else -1
+        self.analysis_selector.setCurrentIndex(index);self.active_analysis_id=self.analysis_selector.currentData()
+        self.analysis_selector.blockSignals(False)
+        self.refresh_samples()
+        self.import_model.removeRows(0,self.import_model.rowCount())
+        for analysis in self.session.analyses:
+            values=[analysis.patient,analysis.profile,Path(analysis.source_file).name,len(self.session.analysis_variants(analysis.id))]
+            items=[QStandardItem(str(value)) for value in values]
+            items[0].setData(analysis.id,Qt.ItemDataRole.UserRole)
+            for item in items:item.setToolTip(self.analysis_label(analysis)+'\n'+analysis.source_file)
+            self.import_model.appendRow(items)
+        for column,width in enumerate([155,140,380,75]):self.import_table.setColumnWidth(column,width)
+        active=self.session.analysis(self.active_analysis_id) if self.active_analysis_id else None
+        self.analysis_context.setText(f'{active.patient} · {active.profile}'+(f' · {active.assay}' if active.assay not in {'Unknown',active.profile} else '') if active else 'Open a TSV to start.')
+        self.analysis_context.setToolTip(active.source_file if active else '')
+        self.analysis_edit_btn.setEnabled(active is not None and not self.active)
+        self.empty_state.setVisible(active is None);self.workspace_pages.setVisible(active is not None)
+        scope=self.active_session()
+        self.variant_model.set_variants(scope.variants)
+        self.show_variant(self.proxy.index(-1,0))
         self.qc_model.removeRows(0,self.qc_model.rowCount())
         failed=set();count=0
-        for v in self.session.variants:
+        for v in scope.variants:
             for flag in qc_flags(v):
                 items=[QStandardItem(str(x)) for x in [v.patient,v.gene,flag.category,flag.status,flag.message,v.kind,v.source_row]]
                 self.qc_model.appendRow(items);count+=1
@@ -500,21 +663,28 @@ class MainWindow(QMainWindow):
         for combo,first in [(self.patient_filter,'All patients'),(self.tissue_patient,None),(self.report_patient,'All patients')]:
             prior=combo.currentText();combo.blockSignals(True);combo.clear()
             if first:combo.addItem(first)
-            combo.addItems(self.session.patients)
+            combo.addItems(scope.patients)
             if combo.findText(prior)>=0:combo.setCurrentText(prior)
             combo.blockSignals(False)
-        self.show_tissue();self.apply_filter();self.refresh_counts();self.refresh_evidence()
+        self.show_tissue();self.update_sources_summary();self.apply_filter();self.refresh_counts();self.refresh_evidence()
+        self.report_analysis_label.setText(self.analysis_label(self.session.analysis(self.active_analysis_id)) if self.active_analysis_id else 'Import an analysis first')
+        self.variant_table.setColumnHidden(1,True)
         self.variant_table.setColumnWidth(0,88);self.variant_table.setColumnWidth(1,145);self.variant_table.setColumnWidth(2,95)
         self.variant_table.setColumnWidth(3,150);self.variant_table.setColumnWidth(4,200)
         self.qc_table.setColumnWidth(4,430)
         self.fit_table_headers()
 
     def refresh_counts(self):
-        total=len(self.session.variants);selected=sum(v.selected for v in self.session.variants)
-        self.summary.setText(f'{len(self.session.patients)} samples · {total:,} rows · {selected} selected')
+        variants=self.active_session().variants
+        total=len(variants);selected=sum(v.selected for v in variants)
+        visible=self.proxy.rowCount()
+        self.next_btn.setEnabled(bool(selected) and not self.active)
+        if self.nav.currentRow()==0:self.summary.setText(f'{len(self.session.analyses)} files · {len(self.session.variants):,} rows')
+        else:self.summary.setText(f'{total:,} rows · {selected} selected'+(f' · {visible} shown' if visible<total else ''))
         self.selection_summary.setText(f'{selected} selected · {self.proxy.rowCount()} visible rows')
 
     def apply_filter(self,*args):
+        self.proxy.candidates_only=not self.show_all_rows.isChecked()
         self.proxy.set_filters(self.patient_filter.currentText(),self.search.text().strip())
         self.refresh_counts()
 
@@ -525,9 +695,9 @@ class MainWindow(QMainWindow):
         if self.active:return
         for row in range(self.proxy.rowCount()):
             index=self.proxy.mapToSource(self.proxy.index(row,0))
-            self.session.variants[index.row()].selected=value
-        if self.session.variants:
-            self.variant_model.dataChanged.emit(self.variant_model.index(0,0),self.variant_model.index(len(self.session.variants)-1,0))
+            self.variant_model.variants[index.row()].selected=value
+        if self.variant_model.variants:
+            self.variant_model.dataChanged.emit(self.variant_model.index(0,0),self.variant_model.index(len(self.variant_model.variants)-1,0))
         self.mark_dirty()
 
     def mark_dirty(self):
@@ -536,12 +706,15 @@ class MainWindow(QMainWindow):
     def show_variant(self,index,*args):
         if not index.isValid():
             self.current_variant=None;self.detail.clear();self.raw_detail.clear()
+            self.normalization_choices.clear();self.use_normalization_btn.setEnabled(False)
+            self.normalization_status.setText('Select a variant to review its name.')
             for edit in (self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit):edit.clear()
             self.verified_check.setChecked(False);return
-        source=self.proxy.mapToSource(index);v=self.session.variants[source.row()];self.current_variant=v
+        source=self.proxy.mapToSource(index);v=self.variant_model.variants[source.row()];self.current_variant=v
         self.gene_edit.setText(v.gene);self.transcript_edit.setText(v.transcript)
         self.hgvs_edit.setText(v.corrected_hgvs);self.verified_check.setChecked(v.nomenclature_verified)
         self.genomic_edit.setText(v.controlled_genomic)
+        self.show_normalization(v)
         lines=[f'{v.gene}  {v.protein}',f'DNA: {v.coding}',f'Transcript: {v.transcript or "Missing"}',
                f'Assembly: {v.assembly}   Locus: {v.locus or "Missing"}',
                f'Allele frequency: {v.af_percent if v.af_percent is not None else "Missing"} %   Coverage: {v.coverage if v.coverage is not None else "Missing"}',
@@ -551,16 +724,46 @@ class MainWindow(QMainWindow):
                f'\nClassification: {v.classification or "Pending"} · Report: {v.report_decision}',
                f'Reviewer: {v.reviewer or "—"}', '\nAssessment: '+v.comment]
         for source,e in v.evidence.items():
-            state=STATUS.get(e.get('status'),e.get('status','Unknown')) if evidence_is_current(v,e,self.session.tissue(v.patient),self.session) else 'Outdated'
+            state=STATUS.get(e.get('status'),e.get('status','Unknown')) if evidence_is_current(v,e,self.session.tissue_for(v),self.session) else 'Outdated'
             lines.append(f'\n{source}: {state}\n{e.get("summary", "")}')
         self.detail.setPlainText('\n'.join(lines))
         self.raw_detail.setPlainText(json.dumps({'source':v.source_file,'row':v.source_row,'assembly':v.assembly,
             'review_needed':review_reasons(v),'raw_data':v.raw,'evidence':v.evidence},ensure_ascii=False,indent=2,default=str))
 
+    def show_normalization(self,v):
+        self.normalization_choices.clear();self.use_normalization_btn.setEnabled(False)
+        evidence=v.evidence.get('Mutalyzer',{})
+        if not evidence:
+            self.normalization_status.setText('Run Mutalyzer to check the variant name.');return
+        if not evidence_is_current(v,evidence,self.session.tissue_for(v),self.session):
+            self.normalization_status.setText('Outdated — rerun Mutalyzer for the current identity.');return
+        assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
+        self.normalization_status.setText(assessment.get('status','Review required')+' · '+assessment.get('reason',evidence.get('summary','')))
+        if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict':return
+        candidates=assessment.get('candidates',[])
+        for candidate in candidates:
+            description=candidate.get('description','')
+            if description:self.normalization_choices.addItem(description,description)
+        preferred=self.normalization_choices.findData(assessment.get('suggested_hgvs'))
+        if preferred>=0:self.normalization_choices.setCurrentIndex(preferred)
+        self.use_normalization_btn.setEnabled(self.normalization_choices.count()>0 and not self.active)
+
+    def use_normalization(self):
+        if self.active or not self.current_variant:return
+        v=self.current_variant;evidence=v.evidence.get('Mutalyzer',{})
+        if not evidence_is_current(v,evidence,self.session.tissue_for(v),self.session):return
+        assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
+        choice=self.normalization_choices.currentData()
+        if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict' or not choice:return
+        if choice not in {candidate.get('description') for candidate in assessment.get('candidates',[])}:return
+        self.hgvs_edit.setText(choice);self.genomic_edit.setText(assessment.get('source_genomic_query',''))
+        self.verified_check.setChecked(False)
+        self.banner.setText('Checked name copied. Review the HGVS and alleles, then approve and save.')
+
     def refresh_variant_row(self,variant):
         # Values changed; row layout did not. A bare layoutChanged notification
         # can leave Qt proxy indexes invalid during selection/detail updates.
-        row=next((i for i,v in enumerate(self.session.variants) if v is variant),None)
+        row=next((i for i,v in enumerate(self.variant_model.variants) if v is variant),None)
         if row is not None:
             self.variant_model.dataChanged.emit(self.variant_model.index(row,0),
                 self.variant_model.index(row,self.variant_model.columnCount()-1))
@@ -589,16 +792,18 @@ class MainWindow(QMainWindow):
         v.controlled_genomic=genomic
         self.session.history.append({'event':'identity_review','id':v.id,'time':datetime.now().astimezone().isoformat(),'hgvs':hgvs})
         self.mark_dirty();self.refresh_variant_row(v);self.refresh_evidence();self.auto_save()
+        self.show_normalization(v)
         self.banner.setText('Review saved. Previous evidence may be outdated.')
 
     def show_tissue(self,*args):
-        self.tissue.setCurrentText(self.session.tissue(self.tissue_patient.currentText()))
+        if not self.active_analysis_id:return
+        analysis=self.session.analysis(self.active_analysis_id)
+        self.tissue.setCurrentText(self.session.tissues.get(analysis.id,self.session.tissue(analysis.patient)))
 
     def save_tissue(self):
         if self.active:return
-        patient=self.tissue_patient.currentText()
-        if not patient:return
-        self.session.tissues[patient]=self.tissue.currentText().strip() or 'Other'
+        if not self.active_analysis_id:return
+        self.session.tissues[self.active_analysis_id]=self.tissue.currentText().strip() or 'Other'
         self.mark_dirty();self.refresh_evidence();self.auto_save()
         self.banner.setText('Tissue saved. Rerun searches if the tissue changed.')
 
@@ -610,14 +815,15 @@ class MainWindow(QMainWindow):
                 if item:selected_keys.add(tuple(item.data(Qt.ItemDataRole.UserRole+1) or ()))
         self.evidence_model.removeRows(0,self.evidence_model.rowCount())
         counts={'Verified match':0,'Review match':0,'Pending':0,'attention':0}
-        for v in self.session.variants:
+        scope=self.active_session()
+        for v in scope.variants:
             sources=set(v.evidence)
             if v.selected:sources.update(s for s,c in self.source_checks.items() if c.isChecked())
             for source in SOURCES:
                 if source not in sources:continue
                 if not source_applies(v,source):continue
                 e=v.evidence.get(source,{})
-                assessment=assess_evidence(v,e,self.session)
+                assessment=assess_evidence(v,e,scope)
                 state=assessment.label
                 if state in counts:counts[state]+=1
                 attention=assessment.retryable or state in {'Review required','Review match'}
@@ -749,7 +955,7 @@ class MainWindow(QMainWindow):
 
     def load_session_path(self,path):
         session=load_session(Path(path))
-        self.session=session;self.session_path=Path(path);self.dirty=False
+        self.session=session;self.session_path=Path(path);self.dirty=False;self.active_analysis_id=None
         self.refresh();self.record_activity('Session opened');self.banner.setText('Session opened')
 
     def open_session(self):
@@ -783,8 +989,11 @@ class MainWindow(QMainWindow):
         if self.active:return
         # Qt's clicked signal may provide a boolean to a callable slot.
         if isinstance(mode,bool):mode='pending'
+        if not self.active_analysis_id:
+            self.notify_error('Import an analysis first.');return
+        scope=self.active_session()
         sources=sorted({source for id,source in chosen}) if mode=='chosen' else [s for s,c in self.source_checks.items() if c.isChecked()]
-        plan=build_search_plan(self.session,sources,mode,chosen)
+        plan=build_search_plan(scope,sources,mode,chosen)
         if not plan:self.banner.setText('No searches to run');self.record_activity(f'{mode}: no searches to run');return
         root=self.work_root()
         if root is None:return
@@ -800,12 +1009,12 @@ class MainWindow(QMainWindow):
         if self.activity:self.activity.secrets.update(value for key,value in credentials.items() if key.endswith('_password') and value)
         self.run_plan=plan;self.run_done=set();self.run_history_saved=set();self.run_id=uuid.uuid4().hex
         self.run_started=time.monotonic();self.run_state='Running';self.run_timer.start()
-        self.session.history.append({'event':'run_start','run_id':self.run_id,'mode':mode,'jobs':sorted(plan),
+        self.session.history.append({'event':'run_start','run_id':self.run_id,'analysis_id':self.active_analysis_id,'mode':mode,'jobs':sorted(plan),
             'time':datetime.now().astimezone().isoformat()})
         self.dirty=True
         if not self.auto_save():self.run_timer.stop();self.run_state='Failed';self.update_run_status();return
         self.control=QueueControl()
-        worker=EvidenceWorker(self.session,sources,root/'evidence',self.control,self.background.isChecked(),plan,credentials)
+        worker=EvidenceWorker(scope,sources,root/'evidence',self.control,self.background.isChecked(),plan,credentials)
         worker.evidence.connect(self.accept_evidence);worker.progress.connect(self.queue_progress)
         worker.outcome.connect(self.queue_outcome);self.launch(worker)
         self.pause_btn.setEnabled(True);self.stop_btn.setEnabled(True);self.pause_btn.setText('Pause')
@@ -816,7 +1025,7 @@ class MainWindow(QMainWindow):
     def rerun_selected(self):
         keys=self.selected_result_keys()
         if not keys:self.banner.setText('Select result rows to rerun');return
-        checked={v.id for v in self.session.variants if v.selected}
+        checked={v.id for v in self.active_session().variants if v.selected}
         if any(id not in checked for id,source in keys):
             self.banner.setText('Check these variants in Workspace before rerunning their results.');return
         self.start_queue('chosen',keys)
@@ -850,6 +1059,7 @@ class MainWindow(QMainWindow):
             if previous:self.session.history.append({'event':'evidence_replaced','run_id':self.run_id,'id':id,'source':source,'evidence':copy.deepcopy(previous)})
             self.run_history_saved.add(key)
         e['run_id']=self.run_id;v.evidence[source]=e;self.dirty=True
+        if self.current_variant is v and source=='Mutalyzer':self.show_normalization(v)
         if 'provisional_status' not in e.get('raw',{}):
             self.run_done.add(key);self.progress.setValue(len(self.run_done))
             assessment=assess_evidence(v,e,self.session)
@@ -888,19 +1098,22 @@ class MainWindow(QMainWindow):
         self.show_account();self.live_status.setText('Idle');self.banner.setText(message);self.record_activity(message)
 
     def export(self):
+        if self.active:return
+        analysis=self.confirmed_analysis()
+        if analysis is None:return
         root=self.work_root()
         if root is None:return
-        chosen=self.report_patient.currentText()
-        patients=self.session.patients if chosen=='All patients' else [chosen] if chosen else []
-        if not patients:self.notify_error('Import a sample first.');return
         self.auto_save();snapshot=copy.deepcopy(self.session)
-        worker=Worker(lambda:[export_patient(snapshot,p,root/'reports') for p in patients])
-        worker.result.connect(self.export_finished)
+        include_evidence=self.include_evidence.isChecked()
+        worker=Worker(lambda:export_analysis(snapshot,analysis.id,root/'reports',include_evidence=include_evidence))
+        worker.result.connect(lambda bundle:self.export_finished(bundle.paths))
         self.launch(worker);self.banner.setText('Exporting Excel…')
 
     def export_finished(self,paths):
         self.report_log.setPlainText('Reports exported:\n'+'\n'.join(map(str,paths)))
-        self.record_activity(f'Exported {len(paths)} patient reports')
+        self.exports_toggle.setChecked(True)
+        self.banner.setText('Excel export complete')
+        self.record_activity(f'Exported analysis report ({len(paths)} Excel files)')
 
     def open_report_folder(self):
         root=self.work_root()

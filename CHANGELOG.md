@@ -1,5 +1,103 @@
 # Changelog
 
+## 0.8.1 — 16 October 2026
+
+- Complete the MolStat-style install/start launchers for Python FELLES via Ivanti
+  and ordinary Windows Python. Check the project layout, preserve special paths,
+  forward local startup arguments and retain actionable error messages/exit codes.
+- Isolate pasted FELLES startup from the host interpreter's command-line flags.
+  Add SOLIDE_INSTALLER.cmd as an installer alias and concise installation docs.
+- Test actual CMD routes and encoded clipboard commands with harmless stand-ins;
+  verification does not install packages or launch institutional applications.
+
+## 0.8.0 — 15 October 2026
+
+- Split file import from variant review: Import, Variants, Searches and Settings.
+  Add a persistent per-file sample list and a concise imported-file overview.
+  Keep source configuration collapsible and Excel export beside search results.
+- Detect the supplied Ion Reporter and Genexus/OPA layouts, respect explicit OPA
+  metadata, and identify Childhood/BRCA panels. Unknown formats require a choice.
+- Extract OUM numbers from metadata or filenames. Missing or conflicting IDs
+  require input; reject exports naming multiple samples. Correct sample bindings
+  without changing source rows, evidence or other imported analyses.
+- Default the variant view to candidates while retaining all raw rows and all-row
+  quality checks. Absent Genexus calls and quality rows can be shown on demand.
+
+## 0.7.1 — 15 October 2026
+
+- Simplify both attachment profiles to Overview and source screenshots; remove
+  the Quality worksheet, source-detail and laboratory-assessment appendices,
+  internal navigation links and default text in the Overview note/comment areas.
+- Show concise source findings and classifications; COSMIC displays linked IDs.
+  Keep source identity checks and retry states in the app without match-status
+  prefixes in Excel. Preserve unavailable/outdated distinctions.
+- Retain complete hidden provenance as plain literal ranges without Excel
+  structured tables. Normalize saved view selections so repeated freezes do not
+  produce invalid duplicate panes. Native Excel normal-load checks passed for
+  all thirteen actual regenerated workbooks.
+
+## 0.7.0 — 15 October 2026
+
+- Check Mutalyzer normalization against independently validated hg19 source
+  REF/ALT, including padding, and canonical genomic sequence events. Offer an
+  explicit source/MANE transcript only after gene/version/event verification;
+  never choose the first equivalent transcript. Checked names still require
+  manual approval in Identity review. Conflicts block downstream searches.
+- Capture the actual SpliceAI query/settings and all basic-annotation transcript
+  scores. Compare the page response with validated API alleles, settings and
+  scores. Missing captures retain predictions and remain retryable. Preserve
+  the original intronic ±100 bp triage after genomic HGVS normalization.
+- Export the Archer/VPM single-workbook layout: Overview, a shared MTBP report,
+  source-ordered variant sheets, all-row Quality and hidden complete source data.
+  Include only Solide's databases. Keep source PNGs intact at readable width.
+- Port selected provider and Edge updates from Archer workstation c12a1b8,
+  including MTBP hidden identities/shared rows/recovery, provider capture
+  diagnostics, Franklin onboarding, COSMIC cache identity and strict ClinVar
+  allele-cache validation. Legacy uncertain MTBP gene matches require recheck.
+
+## 0.6.0 — 14 October 2026
+
+- Keep each imported source in an independent, persistent analysis. OPA and Ion
+  Torrent profiles have their own assay, tissue, selection, quality, searches and
+  export, including when a sample ID is shared. Older sessions migrate without
+  losing rows, assessments or evidence; unconfirmed profiles require review.
+- Replace the combined Excel layout with a compact Findings / Quality / Sources
+  report and a separate VPM-style evidence attachment. Preserve every original
+  row in hidden Raw data and retain source assertions apart from app assessments.
+- Use profile-specific all-row quality sections. Absent CNV/RNA/run-level data
+  remains Not supplied; missing values remain Unknown.
+- Isolate MTBP batch freshness and capture folders by analysis. A rerun expands
+  only its analysis's selected rows; legacy combined evidence remains outdated
+  until rerun. Publish versioned Excel bundles together, with actionable save errors.
+
+## 0.5.1 — 13 October 2026
+
+- Keep Genotype when an Ion Reporter export has a present but empty Call cell.
+  Preserve both original columns and explicit PRESENT, ABSENT and NO CALL states.
+- When Mutalyzer rejects intronic HGVS on an mRNA reference, retain that error
+  and offer a separate genomic hg19 candidate only if the supplied alleles and
+  returned chromosome/transcript context agree. Candidates require manual review.
+- Trim redundant shared VCF bases at the browser-query boundary, retaining indel
+  anchors and the original source identity. Equivalent padded SNVs no longer
+  produce false identity conflicts or missed exact genomic searches.
+- Verify twelve additional raw TSV exports individually through the app import
+  flow, preserving all 76 rows and detecting both row-level coverage failures.
+
+## 0.5.0 — 10 October 2026
+
+- Reduce Excel to four visible worksheets: compact Overview, all-row Quality,
+  indexed Evidence and ordered Raw data. Keep the complete Searches audit hidden
+  by default. Link findings, source results and raw rows directly; put shared
+  full MTBP reports once in Evidence, preserve lossless capture segments and split
+  long assessment notes into readable rows without discarding text.
+- Warn when source metadata describes a filtered export; row QC does not imply
+  complete assay coverage. Reject generated Solide workbooks explicitly as input.
+- Correct FGFR1/MET transcript assignments using NCBI gene records. Preserve
+  successful Mutalyzer normalization if optional mapping fails and support
+  explicit genomic GRCh37 normalization when a transcript is unavailable.
+- Display current SpliceAI gene/transcript fields and validate assembly, query
+  parameters, returned alleles and prediction score ranges before a verified match.
+
 ## 0.4.2 — 10 October 2026
 
 - Empty MTBP reports before each submission and remove each new report after

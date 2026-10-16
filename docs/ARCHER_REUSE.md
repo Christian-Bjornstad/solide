@@ -1,10 +1,37 @@
 # Archer reuse
 
+Latest selective port: branch `feat/workstation-improvements-2026-10-07`, commit
+`c12a1b8bb840e33a41216148bc13be1e5c69682a`, checked 15 October 2026.
+The workbook writer is unchanged since b5f50c6; v0.7.0 now follows that writer's
+single-workbook layout, navy/blue styles, source order, variant tabs and original
+full-height PNG placement at up to 1120 px. Only Solide's database columns are used;
+all-row Quality and hidden Sources/Raw data preserve the laboratory workflow.
+
+New runtime ports include MTBP hidden identity and rowspan parsing, shared-cell
+captures, parser/capture consistency, per-report page recovery, durable recovery
+audits, bounded variant tokens and variant-specific COSMIC caching, OncoKB
+login/absence handling, Franklin onboarding Skip/capture recovery, and Edge
+broker startup. Solide's exact ClinVar API REF/ALT verification stays in place;
+its cache now checks allele identity and indels use exact genomic queries.
+Legacy MTBP gene-only/uncertain absence results are rechecked through the shared
+matching-revision helper without mutating saved evidence.
+
+Historical v0.6.0 design (replaced by the single workbook above):
+The Excel attachment design was checked against VPM (the Archer app) on
+14 October 2026: branch `feat/workstation-improvements-2026-10-07`, revision
+`b5f50c6e031ad9cfe8374e99d7e47b92c22872d1`,
+[`reports/patient_excel.py`](https://github.com/Christian-Bjornstad/Archer-prosess/blob/b5f50c6e031ad9cfe8374e99d7e47b92c22872d1/src/archer_processor/reports/patient_excel.py).
+Reused concepts are the separate evidence attachment, per-variant source order,
+one combined MTBP capture, geometry-based display cropping and atomic save.
+Solide retains complete source pixels, splits tall captures, keeps assessments
+in the app and uses separate OPA/Ion analysis boundaries. Excel assessment
+readback and Archer's clinical exclusion rules were not copied.
+
 Pinned source: https://github.com/Christian-Bjornstad/Archer-prosess
 Revision: 4fda67a43d8002fb2928d60211327b73943967fd
 
 Focused follow-up source: branch `feat/workstation-improvements-2026-10-07`,
-revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9–10 October 2026.
+revision `c6744f98c919fd2ee89b5c8c6ebc57578edf1d0e`, checked 9â€“10 October 2026.
 Upstream `main` still points at the base revision above. This is a selective
 port from the later branch, not a replacement of the vendor tree.
 

@@ -2,7 +2,7 @@
 
 Local Windows desktop app for solid tumour variant review. Import Ion Reporter
 and Genexus exports, review row-level quality, select variants, collect database
-evidence through Edge, and export one Excel workbook per patient.
+evidence through Edge, and export an Archer/VPM-style Excel workbook for each analysis.
 
 ![Solide workspace with synthetic data](docs/images/solide.png)
 
@@ -25,26 +25,64 @@ python start_python_felles.py --session "C:\path\review.solide.json"
 
 For the laboratory's **Python FELLES** environment:
 
-1. Save the project in a permanent folder.
-2. Run `SOLIDE_INSTALL.cmd`, paste the copied command into Python FELLES and press Enter.
-3. Close Python FELLES, run `SOLIDE_START.cmd` and paste its start command.
-4. Choose an approved local workspace folder in **Settings**.
+1. Keep the complete project in a permanent folder.
+2. Double-click **SOLIDE_INSTALL.cmd**. Paste the copied command into Python FELLES
+   with Ctrl+V and press Enter.
+3. When installation finishes, close Python FELLES.
+4. Double-click **SOLIDE_START.cmd** and paste its command to start the app.
+5. Choose a local workspace folder in **Settings**.
 
-The shared-interpreter bootstrap follows
-[MolStat](https://github.com/Christian-Bjornstad/MolStat). Ivanti app ID 15694
-and Python FELLES compatibility must be checked on the work PC. Installation
-uses the user's site-packages without administrator rights. Failure logs are
-written to `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
+The launchers follow [MolStat](https://github.com/Christian-Bjornstad/MolStat):
+Ivanti opens Python FELLES (app ID 15694), and installation/startup run inside
+that interpreter. On ordinary Windows PCs the same launchers use local Python.
+SOLIDE_INSTALLER.cmd also delegates to the installer. Errors stay visible, with
+bootstrap diagnostics in `%LOCALAPPDATA%\Solide\logs\bootstrap.log`.
+See [installation instructions](docs/INSTALLATION.md) for interpreter selection
+and direct Python commands. Work-PC Ivanti/access must be checked there.
 
 ## Workflow
 
-1. **Workspace** imports TSV or Genexus XLSX; confirm patient / sample ID and assembly.
-2. Switch the workspace view to **Quality** to check every imported row, including unselected rows.
-3. **Variants** lets you filter, select and review variant identity. **Assess variant**
-   saves classification, report decision, reviewer and assessment notes in the app.
-4. **Searches** selects databases and MTBP tissue (default **Other**). Save the
-   session, sign in through Settings where needed, then run searches.
-5. Review source status and screenshots before exporting **Reports**.
+1. **Import** opens one original TSV per sample. The file's columns and assay
+   metadata suggest Ion Torrent or OPA. Confirm the detected OUM number, or enter
+   one if missing. Import details contains assay and genome controls; hg19 is the
+   workspace default when the file omits it. Unknown or conflicting inputs need
+   confirmation. The file overview lists Sample, Analysis, File and Rows.
+2. **Variants** uses the sample list on the left. Select that file's variants,
+   review identity and record assessments in the app. The normal view omits
+   unselected absent Genexus calls and CNV/RNA quality rows; **Show all rows**
+   restores them. The **Quality** workspace view always checks all imported rows.
+3. **Searches** contains **Sources / tissue**, database runs, results, selective
+   retries and **Export Excel**. MTBP tissue defaults to Other. Match states and
+   source assertions stay distinct from laboratory classifications.
+4. **Settings** contains local storage, text size and database accounts.
+
+Each original file is an independent sample analysis; no patient is assumed to
+have both OPA and Ion Torrent testing. The same OUM in different files does not
+merge their variants, tissue, searches or reports. **Sample details** can correct
+an OUM binding without modifying source cells or another analysis. **Open review**
+resumes a saved session; **Save** keeps app assessments locally. Excel edits are
+not read back. Original source IDs, rows, metadata and hashes remain retained.
+
+See [Understanding the supplied raw data](docs/RAW_DATA.md) for the difference
+between filtered variant TSVs, full workbooks and reviewed templates.
+
+The workbook follows Archer/VPM: **Overview**, a shared **MTBP** report when
+available and individual variant sheets with source screenshots. Its source
+columns are Solide's eight databases. Complete responses and original rows stay
+in hidden **Sources** and **Raw data** (right-click a tab and choose Unhide).
+[Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+
+**Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
+required. **Use checked name** copies a sequence-verified suggestion and its source
+alleles into the form. Review them, tick **HGVS / mapping reviewed**, then save.
+Original imported names remain intact. A green normalizer result alone is not
+proof that an arbitrary transcript is the right reporting reference.
+
+SpliceAI runs automatically for selected intronic candidates within ±100 bp.
+Its prediction window is ±500 bp with masked scores on hg19; this window differs
+from the rule selecting candidates. The app captures the actual query/settings
+and all basic transcript scores. A failed screenshot retains the API result and
+appears as **Missing capture**, available through **Retry failed**.
 
 Sessions preserve source data, app assessments, reviewed HGVS and search history locally.
 Assessment is performed in the app. Excel is a versioned snapshot; edits to an
@@ -78,7 +116,7 @@ completed jobs.
 - **Rerun… → Selected results**: highlighted result rows, including completed results.
 - **Rerun… → All selected variants**: every selected variant and checked source.
 
-Rerunning any MTBP result targets the complete selected patient batch. An uncertain
+Rerunning any MTBP result targets the complete selected batch in that analysis. An uncertain
 submission retains its exact report ID and is reconciled before submitting it again.
 Previous evidence is archived in local session history before replacement.
 The result list includes **Pending**, **Verified match**, **Review match**,
@@ -109,10 +147,23 @@ differences require mapped, reviewed HGVS on the target transcript:
 
 | Gene | Exported transcript | Target transcript |
 |---|---|---|
-| FGFR1 | NM_001127500.3 | NM_023110.3 |
-| MET | NM_001174067.1 | NM_000245.4 |
+| FGFR1 | NM_001174067.1 | NM_023110.3 |
+| MET | NM_001127500.3 | NM_000245.4 |
+
+The original requirements had the exported accessions exchanged between these
+genes. Their gene assignments were checked against the NCBI records for
+[FGFR1](https://www.ncbi.nlm.nih.gov/nuccore/NM_001174067.1) and
+[MET](https://www.ncbi.nlm.nih.gov/nuccore/NM_001127500.3). Original import values
+are preserved; a mapper's suggestion still needs identity review.
 
 Mutalyzer returns suggestions for manual approval in **Identity review**.
+When no transcript is available, explicit confirmed GRCh37 REF/ALT can provide
+a genomic normalization query. A failed optional MANE mapping retains the
+normalization and records its limitation.
+For intronic HGVS on an mRNA reference, Mutalyzer may report EINTRONIC because
+the reference lacks intronic sequence. If its returned GRCh37 chromosome context
+agrees with the source's explicit alleles, the app records a separate genomic
+candidate. The original error and descriptions remain available for review.
 Corrected HGVS never silently reuses original genomic alleles. Enter matching
 reviewed hg19 `chr-pos-REF-ALT` when a genomic lookup is needed after correction.
 
@@ -150,40 +201,45 @@ Adapters receive variant data and pseudonymous search IDs. Authenticated profile
 stay under `%USERPROFILE%\.solide\browser_profiles`. Source files, sessions,
 reports, credentials and browser profiles are excluded from Git.
 
-Small live ClinVar, Franklin, COSMIC and OncoKB searches were tested locally with
-supplied variant data, including captures and a successful retry after an Edge
-startup failure. MTBP returned **Sign-in required** and needs a fresh sign-in
-before **Other** and full-report capture can be tested. Institutional access
-and the work-PC environment still require a laboratory pilot.
+Live ClinVar, Franklin, COSMIC, OncoKB and authenticated MTBP searches were tested
+locally with supplied variant data, including captures, retries, tissue **Other**,
+full-report capture and verified MTBP deletion. Institutional access and the
+work-PC environment still require a laboratory pilot.
 
 ## Excel reports
 
-Each export creates a new timestamped workbook per patient without replacing
-previous files. The original exports remain untouched.
+Each export creates one new timestamped attachment for the active OPA or Ion
+Torrent analysis, preserving previous exports and original inputs.
 
-- **Overview**: selected variants, original and reviewed descriptions, imported
-  annotation, app classification/decision/reviewer/notes, and evidence links.
-- **Quality**: all QC flags, including unselected rows, with row provenance.
-- **Searches**: result and match status, source assertion, accession, capture time,
-  links and source responses.
-- **Raw data**: original source values and column order, including unnamed
-  columns, followed by source hash, sheet and physical row references.
-- Variant sheets and a shared full MTBP attachment appear when evidence exists.
-  Tall captures are segmented at readable width; outdated screenshots are omitted.
+- **Overview**: variant identity and concise source findings. MTBP shows its
+  functional relevance/evidence text, Franklin and ClinVar their classifications,
+  OncoKB its oncogenicity, and COSMIC a linked mutation ID. The upper note box
+  and Comment cells start blank for manual notes in Excel. Gene names are plain text.
+- **MTBP**: the shared combined report, when current capture evidence is available.
+- **Variant sheets**: an identity header and source screenshots in database order.
+  No lengthy assessment/source-detail appendices or internal worksheet links.
+- Hidden **Sources** and **Raw data**: complete API responses, provenance and
+  original values retained as literal ranges without Excel structured tables.
 
-`Include`, `Exclude` and `Pending` are saved app decisions. The workbook retains
-every selected variant with its decision for review; it does not automatically
-issue a final clinical report or classify variants from database assertions.
-Default manual categories follow the reference template, and custom laboratory
-classification text can be entered.
+The exported attachment has no Quality worksheet. Review all-row quality and
+laboratory assessments in the app. Matching states and retry diagnostics remain
+in the app; unavailable or outdated evidence cannot appear as a positive result.
+Full-height source images remain intact, with valid MTBP display cropping only.
+Excel edits are not read back into the app.
 
 Import supports original Ion Reporter TSV and Genexus TSV/XLSX exports with one
-unambiguous variant table. Reviewed child templates, target/gene coverage tables
+unambiguous variant table. The supplied Childhood/Oncomine Ion export and
+Genexus/OPA exports were both verified. Ion metadata that indicates a filtered
+export produces an import warning and report scope note; QC covers supplied
+rows rather than variants omitted by upstream filters. Reviewed child templates, target/gene coverage tables
 and sample-level QC sheets are separate source structures and are not imported
 as variants. ZIP archives were inspected as design references; extract an original
 TSV/XLSX export locally before importing. Duplicate columns or competing variant
 tables are rejected rather than silently overwriting or duplicating records.
 Workbooks exported by Solide are report snapshots and are not import sources.
+An empty Call cell falls back to a populated Genotype without altering either
+source column. Explicit calls take precedence. Ion genotype strings do not
+automatically select rows for search; use the Workspace checkboxes.
 
 Text is written safely as text, including original values starting with formula
 characters. Excel's cell limit still applies; the session retains full source

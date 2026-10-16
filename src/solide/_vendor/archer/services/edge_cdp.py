@@ -261,10 +261,11 @@ class EdgeCdpContext:
             except Exception as exc:
                 last_error = exc
                 # Managed Edge may hand the command to its broker and let the
-                # original process exit before the broker exposes CDP. Keep
-                # probing the announced endpoint briefly before calling that a
-                # failed launch.
-                if process.poll() is not None and time.monotonic() - started_at >= 3:
+                # original process exit cleanly before the broker exposes CDP.
+                # Give that handoff the full startup budget, including slow
+                # VDI sessions. A nonzero exit still fails after a short grace.
+                exit_code = process.poll()
+                if exit_code not in (None, 0) and time.monotonic() - started_at >= 3:
                     _close_failed_browser(process, browser_version)
                     raise EdgeCdpError(
                         f"Microsoft Edge exited (code {process.returncode}) before "
@@ -1037,7 +1038,8 @@ def _ensure_profile_idle(profile_directory: Path) -> None:
             "Could not confirm the dedicated evidence profile is idle: its "
             "existing DevTools endpoint did not respond reliably. Finish any "
             "search or login using it, or ask IT to inspect the connection. "
-            "Leave other Edge and Citrix windows open."
+            "Leave other Edge and Citrix windows open. "
+            f"Probe: 127.0.0.1:{existing_port}. Actual probe error: {type(exc).__name__}: {exc}"
         ) from exc
     raise EdgeCdpProfileInUse(
         "The dedicated evidence profile is already in use. Finish the evidence "

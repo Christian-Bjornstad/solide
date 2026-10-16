@@ -30,7 +30,16 @@ def test_splice_and_transcript_guards():
     assert 'SpliceAI' in review_reasons(Variant(coding='c.2350-100A>T'))
     assert 'SpliceAI' not in review_reasons(Variant(coding='c.2350-101A>T'))
     assert 'Mutalyzer' in review_reasons(Variant(coding='c.10_12delinsAA'))
-    assert 'MANE' in review_reasons(Variant(gene='MET',transcript='NM_001174067.1'))
+    assert 'MANE' in review_reasons(Variant(gene='MET',transcript='NM_001127500.3'))
+
+
+@pytest.mark.parametrize('gene,original,target',[
+    ('FGFR1','NM_001174067.1','NM_023110.3'),('MET','NM_001127500.3','NM_000245.4')])
+def test_mane_targets_use_gene_correct_ncbi_accessions(gene,original,target):
+    from solide.quality import MANE_TARGETS
+    assert MANE_TARGETS[gene]==(original,target)
+    assert 'MANE' in review_reasons(Variant(gene=gene,transcript=original))
+    assert 'MANE' not in review_reasons(Variant(gene=gene,transcript=target))
 
 def test_metadata_and_malformed_file(tmp_path):
     p=tmp_path/'x.tsv'

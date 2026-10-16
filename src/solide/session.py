@@ -2,7 +2,8 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from .models import Session, Variant
+from .models import Analysis, Session, Variant
+from .analyses import ensure_analyses, validate_analyses
 
 
 def atomic_write(path: Path, payload: str) -> None:
@@ -21,18 +22,28 @@ def atomic_write(path: Path, payload: str) -> None:
 
 
 def save_session(session: Session, path: Path) -> None:
+    ensure_analyses(session)
     atomic_write(path, json.dumps(session.to_dict(), ensure_ascii=False, indent=2, default=str))
 
 
 def load_session(path: Path) -> Session:
     data = json.loads(Path(path).read_text(encoding='utf8'))
-    if data.get('schema_version') != 1 or not isinstance(data.get('variants'), list):
+    if (not isinstance(data, dict) or type(data.get('schema_version')) is not int
+            or data['schema_version'] not in {1, 2} or not isinstance(data.get('variants'), list)
+            or not isinstance(data.get('analyses', []), list)):
         raise ValueError('Unknown or invalid Solide session.')
-    data['variants'] = [Variant(**v) for v in data['variants']]
+    legacy = data['schema_version'] == 1
+    try:
+        data['variants'] = [Variant(**v) for v in data['variants']]
+        data['analyses'] = [Analysis(**analysis) for analysis in data.get('analyses', [])]
+        session = Session(**data)
+    except (TypeError, ValueError):
+        raise ValueError('Unknown or invalid Solide session.') from None
     for variant in data['variants']:
         if variant.assembly == 'Ukjent':
             variant.assembly = 'Unknown'
-    session = Session(**data)
-    if len({v.id for v in session.variants}) != len(session.variants):
-        raise ValueError('Session contains duplicate row IDs.')
+    if legacy:
+        ensure_analyses(session)
+    else:
+        validate_analyses(session)
     return session

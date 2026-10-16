@@ -7,6 +7,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src'))
 from PyQt6.QtWidgets import QApplication
 from solide.models import Variant,Session
+from solide.analyses import ensure_analyses
 from solide.gui import MainWindow
 from PIL import Image,ImageDraw
 
@@ -40,7 +41,10 @@ first.evidence['ClinVar']={'database':'ClinVar','status':'found','summary':'Synt
     'raw':{'screenshots':[{'path':str(synthetic),'label':'Synthetic example'}]}}
 second.evidence['Franklin']={'database':'Franklin','status':'timeout','summary':'Synthetic example — request timed out',
     'captured_at':'2026-09-30T18:00:00+00:00','fingerprint':second.fingerprint('Other')}
-window.refresh();window.nav.setCurrentRow(0);window.show();app.processEvents()
+ensure_analyses(window.session)
+for analysis in window.session.analyses:
+    analysis.profile='OPA';analysis.assay='Oncomine Precision Assay'
+window.refresh();window.nav.setCurrentRow(1);window.show();app.processEvents()
 window.variant_table.selectRow(0);app.processEvents()
 out=Path('artifacts/solide-preview.png').resolve();out.parent.mkdir(exist_ok=True)
 window.grab().save(str(out));print(out)
@@ -48,7 +52,7 @@ for index in range(window.nav.count()):
     window.nav.setCurrentRow(index);app.processEvents()
     window.grab().save(str(out.parent/f'page-{index}.png'))
 window.resize(1050,700)
-for index in (0,1,3):
+for index in (0,1,2,3):
     window.nav.setCurrentRow(index);app.processEvents()
     window.grab().save(str(out.parent/f'compact-{index}.png'))
 window.dirty=False;window.close()
