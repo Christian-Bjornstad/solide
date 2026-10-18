@@ -16,7 +16,7 @@ from .analyses import analysis_scoped_session, validate_analyses
 from .quality import review_reasons, MANE_TARGETS
 from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
 from .brca_exchange import brca_exchange_variant
-from .public_capture import capture_spliceai,capture_mutalyzer,spliceai_url
+from .public_capture import capture_spliceai,capture_mutalyzer,capture_brca_exchange,spliceai_url
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
 from ._vendor.archer.services.evidence_audit import audit_digest,mtbp_legacy_matching_issue
@@ -84,6 +84,12 @@ def assess_evidence(v, evidence, session):
     if status=='not_applicable':return EvidenceAssessment('Not applicable',evidence.get('summary',''))
     if status=='found':
         source=evidence.get('database','')
+        if source=='BRCA Exchange':
+            capture=raw.get('capture')
+            if (raw.get('capture_issue') or capture is not None and
+                    (not capture_available(evidence) or capture.get('identity_confirmed') is not True
+                     or capture.get('classification_confirmed') is not True)):
+                return EvidenceAssessment('Missing capture','Verified API result retained; retry the BRCA Exchange source screenshot.',True)
         if source in (*SOURCES[:5],'SpliceAI'):
             if not capture_available(evidence):
                 return EvidenceAssessment('Missing capture','Result screenshot is missing.',True)
@@ -327,7 +333,17 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                                       'url':'https://mutalyzer.nl/normalizer/'+quote(data.get('original',''),safe='')})
                     elif source == 'BRCA Exchange':
                         query_record(v,source)
-                        store(v,source,brca_exchange_variant(v))
+                        item=brca_exchange_variant(v)
+                        if item.get('status')=='found':
+                            try:
+                                captured=capture_brca_exchange(item,patient_directory/'BRCAExchange',background=background,
+                                    checkpoint=control.checkpoint,progress=progress)
+                                item['raw'].update(screenshots=captured['screenshots'],capture=captured)
+                            except BrowserReviewCancelled:raise
+                            except Exception as exc:
+                                item['raw']['capture_issue']=str(exc)
+                                progress('BRCA Exchange: API result retained; screenshot requires retry')
+                        store(v,source,item)
                     else:
                         genomic_query(v)
                         control.wait(max(0, 30 - (time.monotonic() - last_splice)))

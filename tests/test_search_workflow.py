@@ -211,6 +211,8 @@ def test_brca_plan_and_queue_never_query_other_genes(monkeypatch,tmp_path):
         return {'status':'found','clinical_significance':'Source assertion','raw':{'query_basis':'full_hgvs',
             'identity_verification':{'accepted':True,'requested':identity,'returned':identity,'method':'full_hgvs'}}}
     monkeypatch.setattr(module,'brca_exchange_variant',lookup)
+    monkeypatch.setattr(module,'capture_brca_exchange',lambda *args,**kwargs:{
+        'screenshots':[],'identity_confirmed':True,'classification_confirmed':True})
     variants=[Variant(patient='DEMO',gene=gene,transcript='NM_1.1',coding='c.1A>T',assembly='GRCh37',selected=True)
         for gene in ('BRCA1','BRCA2','EGFR','BRCA1,BRCA2')]
     s=Session(variants=variants);sources=['BRCA Exchange']
@@ -220,7 +222,8 @@ def test_brca_plan_and_queue_never_query_other_genes(monkeypatch,tmp_path):
     assert calls==['BRCA1','BRCA2']
     assert all(not v.evidence for v in variants[2:])
     evidence=variants[0].evidence['BRCA Exchange'];assessment=assess_evidence(variants[0],evidence,s)
-    assert assessment.label=='Verified match' and 'versioned HGVS' in assessment.reason
+    assert assessment.label=='Missing capture'
+    assert evidence['raw']['identity_verification']['accepted'] is True
     assert not variants[0].classification and variants[0].report_decision=='Pending'
 
 

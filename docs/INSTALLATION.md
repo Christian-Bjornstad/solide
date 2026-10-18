@@ -38,7 +38,6 @@ The equivalent terminal commands are:
 ```powershell
 python install_python_felles.py
 python start_python_felles.py
-python start_python_felles.py --session "C:\path\review.solide.json"
 ```
 
 Startup does not install packages automatically. Rerun SOLIDE_INSTALL.cmd if

@@ -16,7 +16,6 @@ with patch('solide.gui.Path.home',return_value=Path('artifacts/preview-home').re
      patch('solide.gui.ActivityLog',return_value=None), \
      patch('solide.gui.read_password',return_value=''):
     window=MainWindow()
-window.output_dir.setText('C:/Solide/workspace')
 window.session=Session(variants=[
     Variant(patient='DEMO-001',gene='EGFR',transcript='NM_005228.5',coding='c.2573T>G',protein='p.L858R',
             af_percent=21.1,coverage=7050,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True,
@@ -55,4 +54,8 @@ window.resize(1050,700)
 for index in (0,1,2,3):
     window.nav.setCurrentRow(index);app.processEvents()
     window.grab().save(str(out.parent/f'compact-{index}.png'))
+window.text_size.setCurrentIndex(window.text_size.findData(20))
+for index in range(window.nav.count()):
+    window.nav.setCurrentRow(index);app.processEvents()
+    window.grab().save(str(out.parent/f'large-text-{index}.png'))
 window.dirty=False;window.close()

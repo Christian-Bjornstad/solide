@@ -65,12 +65,12 @@ def test_default_is_one_workbook_with_vpm_layout_and_source_order(tmp_path):
     bundle=export_analysis(session,'analysis-a',tmp_path)
     assert bundle.paths==(bundle.report,) and bundle.attachment is None
     with load_workbook(bundle.report) as book:
-        assert book.sheetnames==['Overview','MET','EGFR','Sources','Raw data']
-        assert book['Sources'].sheet_state==book['Raw data'].sheet_state=='hidden'
-        overview=book['Overview']
+        assert book.sheetnames==['Oversikt','MET','EGFR','Kilder','Rådata']
+        assert book['Kilder'].sheet_state==book['Rådata'].sheet_state=='hidden'
+        overview=book['Oversikt']
         assert {'A1:M2','A6:M6','D3:M4'}<={str(item) for item in overview.merged_cells.ranges}
         assert overview['A1'].font.sz==22 and overview['A1'].fill.fgColor.rgb[-6:]=='163B5C'
-        assert [overview.cell(7,col).value for col in range(1,14)]==['Gene','HGVSc','HGVSp','Short evidence','Comment',*SOURCE_ORDER]
+        assert [overview.cell(7,col).value for col in range(1,14)]==['Gen','HGVSc','HGVSp','Kildefunn','Kommentar',*SOURCE_ORDER]
         assert [overview.cell(row,1).value for row in (8,9)]==['MET','EGFR']
         assert [overview.column_dimensions[col].width for col in 'ABCDE']==[14,31,25,52,32]
         assert all(overview.column_dimensions[col].width==22 for col in 'FGHIJKLM')
@@ -101,7 +101,7 @@ def test_vpm_images_keep_full_pixels_and_reserve_height_without_segmentation(tmp
         assert book['EGFR'].row_dimensions[first].height==28.5
         assert book['EGFR'].row_dimensions[first+48].height==28.5
         caption=book['EGFR'].cell(first-1,1)
-        assert caption.value=='Classification evidence' and caption.hyperlink is None
+        assert caption.value=='Klassifikasjon' and caption.hyperlink is None
     with zipfile.ZipFile(bundle.report) as archive:
         pngs=[name for name in archive.namelist() if name.startswith('xl/media/')]
         assert len(pngs)==1
@@ -127,16 +127,16 @@ def test_vpm_keeps_raw_scope_and_leaves_app_assessments_in_the_app(tmp_path):
         all_values=text(book)
         assert 'DO-NOT-MIX' not in all_values
         assert 'Lab assessment' not in all_values and 'Database assertion' in all_values
-        assert book['Overview']['B8'].value=='c.1A>T'
+        assert book['Oversikt']['B8'].value=='c.1A>T'
         assert 'NM_005228.5' in all_values
         assert rows[0].corrected_hgvs=='NC_000007.13:g.1A>T'
         assert 'END OF APP ASSESSMENT' not in all_values and 'Lab reviewer' not in all_values
         assert rows[0].comment==note and rows[0].reviewer=='Lab reviewer'
         assert 'Quality' not in book.sheetnames
-        assert book['Raw data']['B2'].value=='=1+1' and book['Raw data']['B2'].data_type=='s'
-        assert book['Raw data'].max_row==5
-        sources=book['Sources']
-        stored=next(row for row in sources if row[7].value==rows[0].id and row[9].value=='JSON response')
+        assert book['Rådata']['B2'].value=='=1+1' and book['Rådata']['B2'].data_type=='s'
+        assert book['Rådata'].max_row==5
+        sources=book['Kilder']
+        stored=next(row for row in sources if row[7].value==rows[0].id and row[9].value=='JSON-svar')
         reconstructed=''.join(str(cell.value or '') for cell in stored[10:])
         assert json.loads(reconstructed)==rows[0].evidence['ClinVar']['raw']
         assert not any(cell.data_type=='f' for sheet in book for row in sheet for cell in row)
@@ -156,8 +156,8 @@ def test_rejected_or_stale_capture_stays_excluded_and_sources_retained(tmp_path)
     rows[1].evidence['Franklin']=result(rows[1],path,fingerprint='outdated')
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
         assert not any(sheet._images for sheet in book)
-        assert 'Identity mismatch' in text(book) and 'Outdated' in text(book)
-        assert len([row for row in book['Sources'] if row[2].value=='Franklin'])==2
+        assert 'Feil variant' in text(book) and 'Utdatert' in text(book)
+        assert len([row for row in book['Kilder'] if row[2].value=='Franklin'])==2
 
 
 @pytest.mark.parametrize('status',['found','not_found'])
@@ -176,9 +176,9 @@ def test_mtbp_full_report_once_second_and_display_crop_is_lossless(tmp_path,stat
         variant.evidence['MTBP']=item
     bundle=export_analysis(session,'analysis-a',tmp_path)
     with load_workbook(bundle.report) as book:
-        assert book.sheetnames[:4]==['Overview','MTBP','EGFR','MET']
+        assert book.sheetnames[:4]==['Oversikt','MTBP','EGFR','MET']
         assert book['MTBP']['A1'].value=='SAMPLE'
-        assert book['MTBP']['A6'].value=='MTBP – combined report'
+        assert book['MTBP']['A6'].value=='MTBP – samlet rapport'
         assert len(book['MTBP']._images)==1
         assert len([image for sheet in book for image in sheet._images])==1
         assert book['MTBP']._images[0].anchor._from.row==6
@@ -200,7 +200,7 @@ def test_unassigned_and_no_evidence_export(tmp_path):
     rows[0].evidence['Franklin']=result(rows[0],capture(tmp_path))
     with load_workbook(export_analysis(session,'analysis-a',tmp_path,include_evidence=False).report) as book:
         assert not any(sheet._images for sheet in book)
-        assert 'Franklin' in text(book) and book['Sources'].sheet_state=='hidden'
+        assert 'Franklin' in text(book) and book['Kilder'].sheet_state=='hidden'
 
 
 def test_normalization_details_stay_in_hidden_storage_and_app_classification_is_unchanged(tmp_path):
@@ -212,9 +212,9 @@ def test_normalization_details_stay_in_hidden_storage_and_app_classification_is_
              'genomic_hgvs':'NC_000010.10:g.1_2del','source_genomic_query':'10-1-AC-A'}}
     rows[0].evidence['Mutalyzer']=result(rows[0],source='Mutalyzer',status='needs_review',raw=raw)
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
-        assert 'Mutalyzer – Check variant' in text(book)
+        assert 'Mutalyzer – Kontroller variant' in text(book)
         assert not book['PTEN']._images
-        stored=next(row for row in book['Sources'] if row[7].value==rows[0].id and row[9].value=='JSON response')
+        stored=next(row for row in book['Kilder'] if row[7].value==rows[0].id and row[9].value=='JSON-svar')
         assert json.loads(''.join(str(cell.value or '') for cell in stored[10:]))==raw
         assert rows[0].classification=='Laboratory review'
 
@@ -225,7 +225,7 @@ def test_duplicate_gene_names_reservations_and_literal_app_notes(tmp_path):
         Variant(gene='MET',protein='NP_000236.2:p.X1Y',selected=True),Variant(gene='Quality',selected=True))
     bundle=export_analysis(session,'analysis-a',tmp_path,include_evidence=False)
     with load_workbook(bundle.report) as book:
-        assert book.sheetnames[:4]==['Overview','MET p.X1Y','MET p.X1Y-2','Quality-2']
+        assert book.sheetnames[:4]==['Oversikt','MET p.X1Y','MET p.X1Y-2','Quality-2']
         assert rows[0].comment=='=literal app note'
         assert '=literal app note' not in text(book)
         assert not any(cell.data_type=='f' for sheet in book for row in sheet for cell in row)

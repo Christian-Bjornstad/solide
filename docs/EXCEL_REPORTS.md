@@ -1,6 +1,6 @@
 # Analysis report contract — v0.7.1
 
-One original source is one persistent OPA or Ion Torrent analysis. Sample IDs do
+One original source is one OPA or Ion Torrent analysis in the current session. Sample IDs do
 not merge separate sources. Selection, tissue, queries and export use the active
 analysis. Assay identifies the panel, for example Childhood or BRCA/HRR.
 
@@ -9,7 +9,7 @@ analysis. Assay identifies the panel, for example Childhood or BRCA/HRR.
 The default export is one versioned Excel workbook, following the pinned Archer
 patient writer's layout, colours, source order and original image placement:
 
-- **Overview**: navy title rows 1–2, sample/date rows 3–4, section row 6 and
+- **Oversikt**: navy title rows 1–2, sample/date rows 3–4, section row 6 and
   filterable findings from row 8. The merged D3:M4 box and Comment cells are
   blank for manual Excel notes. Gene names are plain text, with no worksheet links.
 - Source columns show the actual source content: MTBP functional relevance and
@@ -17,22 +17,28 @@ patient writer's layout, colours, source order and original image placement:
   identifiers and BRCA expert classification. Only current usable source records
   get an external link. Not-found results and unavailable/outdated evidence remain
   distinguishable; operational Review match / Verified match labels stay in the app.
-- **MTBP**, when available: one copy of each combined report after Overview.
+- **MTBP**, when available: one copy of each combined report after Oversikt.
 - **Variant sheets**: identity header followed by source screenshot sections.
   No repeated source-detail tables or laboratory-assessment appendix after the images.
   Unqueried/inapplicable sources add no empty sections. No internal navigation links.
 - No **Quality** worksheet in either report profile. All-row QC remains in the app.
-- Hidden **Sources** and **Raw data** retain full responses, metadata and original
+- Hidden **Kilder** and **Rådata** retain full responses, metadata and original
   ordered cells. They use literal ranges, without Excel structured tables or
   local capture links. Right-click a tab and choose Unhide to inspect them.
   Large JSON uses exact literal chunks, not truncation.
+
+App-owned headings, captions and statuses are Norwegian. Original classifications
+(including Benign), MTBP text, source screenshots, raw JSON and imported cells
+remain verbatim. Missing OUM identifiers require manual entry in the import
+dialog; valid typed identifiers are uppercased. Supported exports represent one
+sample per file, and multiple supplied sample identifiers are rejected.
 
 Original screenshots are embedded intact at up to 1120 px width without shrinking
 long captures to a fixed height. Valid MTBP geometry crops only the display copy;
 its original PNG remains unchanged. Shared full reports are not repeated under
 variants. Stale, conflicting, incomplete or unreadable captures are excluded with
 an explicit state. The source assertions never become laboratory classifications. App assessments
-remain in the saved app session; only source content is presented in the attachment.
+remain in the current in-memory app session until close; only source content is presented in the attachment.
 
 **Include source screenshots** controls images in the same workbook. Saving a new
 version preserves earlier exports; retry a save error without rerunning searches.
@@ -74,6 +80,20 @@ including REF/ALT columns. The page's returned allele, genome, mask, distance,
 transcripts and DS/DP scores must agree with the API response before capture.
 Missing or incompatible images retain the API prediction and expose Missing
 capture for retry. A verified identity is not a clinical splicing classification.
+
+When SpliceAI is not indicated, Oversikt states **Ikke kjørt**. The ±100 bp
+intronic selection rule is unchanged. The app shows the number of
+selected candidates before running.
+
+BRCA Exchange captures the current Variant Names and Clinical Significance
+(ENIGMA) panels. The visible gene, versioned cDNA, GRCh37 HGVS, source assertion
+and evaluation date must match the verified API record, including after a
+canonical allele redirect. Historical versions are excluded from the capture.
+A failed capture retains the API response and becomes Missing capture for retry.
+
+All displayed export and capture dates use Europe/Oslo, including automatic DST.
+Excel stores local dates as native date cells, with `dd.mm.yyyy hh:mm:ss` format;
+report filenames use the same local clock. Original ISO source stamps stay intact.
 
 ## Data and MTBP preservation
 

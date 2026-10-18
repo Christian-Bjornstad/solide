@@ -1,11 +1,11 @@
 """Bounded local activity log. Secrets never belong in activity messages."""
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
 import logging
 import os
 from pathlib import Path
 import re
 from collections import deque
+from .localtime import oslo_now
 
 
 class ActivityLog:
@@ -25,7 +25,7 @@ class ActivityLog:
         return re.sub(r'(?i)((?:password|access_token|api_key|token|authorization)\s*[=:]\s*)[^\s&;]+', r'\1[redacted]', text)
 
     def write(self, message):
-        entry = f'{datetime.now().astimezone().isoformat(timespec="seconds")}  {self.redact(message)}'
+        entry = f'{oslo_now().isoformat(timespec="seconds")}  {self.redact(message)}'
         self.logger.info(entry)
         return entry
 

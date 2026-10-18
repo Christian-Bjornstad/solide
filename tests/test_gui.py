@@ -16,8 +16,7 @@ def test_variant_selection_filter_and_session(tmp_path):
     assert window.proxy.rowCount()==1
     window.select_visible(True)
     assert all(v.selected for v in window.session.variants)
-    window.save_to(tmp_path/'demo.solide.json')
-    assert (tmp_path/'demo.solide.json').exists()
+    assert not (tmp_path/'demo.solide.json').exists()
     window.close()
 
 
@@ -35,6 +34,7 @@ def test_english_navigation_and_identity_review_tab():
     assert 'on row 8' in window.qc_model.item(0,4).text()
     tabs=window.findChild(QTabWidget)
     assert tabs.tabText(1)=='Identity review'
+    window.details_toggle.setChecked(True)
     tabs.setCurrentIndex(1);app.processEvents()
     assert window.hgvs_edit.isVisible()
     window.close()
@@ -93,7 +93,7 @@ def test_retry_worker_counts_only_targeted_failures(monkeypatch,tmp_path):
     for v,status in ((a,'error'),(b,'not_found')):
         v.evidence['ClinVar']={'database':'ClinVar','status':status,'fingerprint':v.fingerprint('Other'),'summary':'Original'}
     window.session=Session(variants=[a,b]);window.session_path=tmp_path/'session.solide.json'
-    window.output_dir.setText(str(tmp_path));window.refresh()
+    window.refresh()
     for source,check in window.source_checks.items():check.setChecked(source=='ClinVar')
     window.start_queue('failed')
     deadline=time.monotonic()+5
@@ -166,8 +166,8 @@ def test_assessment_dialog_saves_into_app_session(monkeypatch,tmp_path):
     window.refresh();window.variant_table.selectRow(0);app.processEvents();window.assess_variant()
     assert window.session.variants[0].classification=='VUS'
     assert 'Manual assessment' in window.detail.toPlainText()
-    from solide.session import load_session
-    assert load_session(window.session_path).variants[0].report_decision=='Include'
+    assert window.session.variants[0].report_decision=='Include'
+    assert not window.session_path.exists()
     assert window.session.history[-1]['event']=='assessment'
     window.close()
 

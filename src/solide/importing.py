@@ -1,6 +1,7 @@
 from __future__ import annotations
 import csv
 import hashlib
+import io
 import math
 import re
 from pathlib import Path
@@ -112,7 +113,9 @@ def _is_solide_report(identifier, tables) -> bool:
 def load_file(path: Path) -> ImportResult:
     path = Path(path)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    source_path=str(path.resolve())
     metadata, hint, warnings = {}, '', []
+    tsv_rows=None
     if path.suffix.lower() == '.xlsx':
         from openpyxl import load_workbook
         w = load_workbook(path, read_only=True, data_only=True)
@@ -125,16 +128,29 @@ def load_file(path: Path) -> ImportResult:
     elif path.suffix.lower() == '.tsv':
         payload = path.read_bytes()
         try:
-            lines = payload.decode('utf-8-sig').splitlines()
+            decoded = payload.decode('utf-8-sig')
         except UnicodeDecodeError:
-            lines = payload.decode('cp1252').splitlines()
-        rows = []
-        for line in lines:
-            if line.startswith('##'):
-                key, sep, value = line.split('\t', 1)[0][2:].partition('=')
-                if sep:
-                    metadata[key] = value
-            rows.append(next(csv.reader([line], delimiter='\t')))
+            decoded = payload.decode('cp1252')
+        rows,tsv_rows=[],[]
+        reader=csv.reader(io.StringIO(decoded,newline=''),delimiter='\t',strict=True)
+        header_seen=False
+        try:
+            while True:
+                source_row=reader.line_num+1
+                try:row=next(reader)
+                except StopIteration:break
+                if row and row[0].startswith('##'):
+                    key,sep,value=row[0][2:].partition('=')
+                    if sep:
+                        if header_seen:
+                            raise ValueError('Flere eksportblokker i TSV-filen. Eksporter én prøve per fil.')
+                        if key in metadata and metadata[key]!=value:
+                            raise ValueError('Motstridende metadata i TSV-filen. Kontroller eksporten.')
+                        metadata[key]=value
+                if 'Type' in row and ('Gene' in row or 'Genes' in row):header_seen=True
+                rows.append(row);tsv_rows.append(source_row)
+        except csv.Error as exc:
+            raise ValueError(f'Ugyldig TSV ved linje {reader.line_num}: {exc}') from exc
         tables = [('', rows)]
         hint = metadata.get('sampleNames', '')
     else:
@@ -160,7 +176,10 @@ def load_file(path: Path) -> ImportResult:
         if len(named)!=len({h.casefold() for h in named}):
             raise ValueError('Duplicate column names found. Choose the original variant export instead of a reviewed worksheet.')
         platform = 'Ion Reporter' if 'Transcript' in headers and 'Genes' in headers else 'Genexus'
-        for index, row in enumerate(rows[header_index + 1:], header_index + 2):
+        for offset, row in enumerate(rows[header_index + 1:], header_index + 1):
+            index=tsv_rows[offset] if tsv_rows is not None else offset+1
+            if any(text(value) for value in row[len(headers):]):
+                raise ValueError(f'Rad {index} har flere kolonner enn overskriften. Kontroller eksporten.')
             raw = {h: cell for h, cell in zip(headers, row) if h}
             if text(raw.get('Type'))=='Type' and text(raw.get('Gene',raw.get('Genes'))) in {'Gene','Genes'}:
                 continue
@@ -187,7 +206,7 @@ def load_file(path: Path) -> ImportResult:
                 kind=text(get('Type')), call=call, af_percent=af,
                 coverage=number(get('Coverage')), copy_number=number(get('Copy Number')),
                 variant_id=text(get('Variant ID')), assembly=assembly, platform=platform,
-                source_file=str(path.resolve()), source_hash=digest, source_row=index,
+                source_file=source_path, source_hash=digest, source_row=index,
                 selected=call.upper().startswith('PRESENT') and text(get('Type')).lower() in
                 {'snp', 'snv', 'del', 'ins', 'indel', 'mnp', 'complex'}, raw=raw))
     if not variants:
@@ -207,7 +226,20 @@ def load_file(path: Path) -> ImportResult:
     sample_metadata=text(metadata.get('sampleNames') or metadata.get('sampleName'))
     if len(oum_numbers(sample_metadata))>1 or len([part for part in re.split(r'[,;]',sample_metadata) if part.strip()])>1:
         raise ValueError('Multiple samples are named in this export. Choose one original sample TSV per import.')
-    candidates=list(dict.fromkeys(oum_numbers(sample_metadata)+oum_numbers(hint)+oum_numbers(path.stem)))
+    sample_columns={'sample','samplename','sampleid','samplenames'}
+    row_samples={}
+    for variant in variants:
+        for key,value in variant.raw.items():
+            name=re.sub(r'[\s_-]','',key).casefold()
+            if name in sample_columns and text(value) not in {'','-'}:
+                row_samples.setdefault(name,set()).add(text(value).casefold())
+    row_oum=list(dict.fromkeys(number for values in row_samples.values() for value in values for number in oum_numbers(value)))
+    if any(len(values)>1 for values in row_samples.values()) or len(row_oum)>1:
+        raise ValueError('Flere prøver i TSV-filen. Eksporter én prøve per fil.')
+    metadata_ids=list(dict.fromkeys(number for key in ('sampleNames','sampleName') for number in oum_numbers(text(metadata.get(key)))))
+    if len(set(metadata_ids+row_oum))>1:
+        raise ValueError('Flere prøver i TSV-filen. Kontroller prøvefeltene.')
+    candidates=list(dict.fromkeys(metadata_ids+row_oum+oum_numbers(hint)+oum_numbers(path.stem)))
     if len(candidates)>1:
         warnings.append('Conflicting OUM numbers in the source and filename. Confirm the correct sample before import.')
         hint=''

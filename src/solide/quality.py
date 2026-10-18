@@ -52,7 +52,8 @@ def review_reasons(v: Variant) -> list[str]:
     # Genomic normalization can remove the c. intron offset from the reviewed
     # name. Retain the original transcript context for splicing triage.
     coding=' '.join(filter(None,[v.coding,v.corrected_hgvs]))
-    if any(1 <= int(n) <= 100 for n in re.findall(r'\d+[+-](\d+)',coding)):
+    offsets=(n.lstrip('0') for n in re.findall(r'\d+[+-](\d+)',coding))
+    if any(n and len(n)<=3 and 1<=int(n)<=100 for n in offsets):
         reasons.append('SpliceAI')
     target = MANE_TARGETS.get(v.gene)
     if target and (target[0] in v.transcript or not v.transcript):

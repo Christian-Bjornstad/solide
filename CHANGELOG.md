@@ -1,5 +1,44 @@
 # Changelog
 
+## Unreleased — 18 October 2026
+
+- Stress-test synthetic OPA/Ion files, malformed data, random GUI actions,
+  interrupted workers, export failures and 5,000-row inputs with an opt-in script.
+- Preserve quoted multiline TSV cells and physical source row numbers. Reject
+  broken quoting, extra nonempty fields and concatenated export metadata rather
+  than silently discarding cells or binding multiple exports to one sample.
+- Recover from invalid saved UI setting types and handle extreme intron offsets
+  without crashing. Resolve each source path once and avoid rebuilding the
+  results table twice after import.
+- Remove repeated workflow/storage explanations and the unused SAMPLES heading.
+  Keep file switching in the sidebar. Replace native dark control details with
+  matching green controls and add an editable SVG/Windows app icon.
+- Use concise Norwegian workbook labels and statuses; preserve source
+  classifications, MTBP text, screenshots and original imported cells verbatim.
+- Require a valid OUM number when import cannot detect one; uppercase typed
+  identifiers automatically. Reject multiple sample IDs in row-level sample fields.
+- Shorten skipped SpliceAI report cells to “Ikke kjørt” and remove repeated
+  workflow explanations from the app.
+- Use Europe/Oslo for displayed timestamps, Excel dates and report filenames,
+  including daylight saving changes; keep original source timestamps intact.
+- Show SpliceAI candidate counts. Live PTEN captures include the query/settings and all
+  transcript scores.
+- Capture BRCA Exchange's current variant and ENIGMA panels automatically after
+  exact API identity verification. Check the displayed gene, versioned HGVS,
+  GRCh37 name, classification and evaluation date before including the image.
+  Keep API evidence and expose Retry failed when the screenshot cannot be verified.
+
+- Simplify the four-tab flow to TSV import, variant selection, database searches
+  and explicit Excel export. Open recognised files directly when the sample ID
+  is unambiguous; keep confirmation for missing or conflicting identifiers.
+- Remove saved-review actions and the mandatory workspace folder. Search
+  captures and activity logs use a temporary workspace, cleared on normal close
+  or Clear files. Review state is not autosaved, including legacy reviews.
+- Ask for an export destination only when Export Excel is clicked; preserve
+  existing Excel files and embed screenshots in the workbook.
+- Give the variant grid cell selection, row numbers and Ctrl+C for Excel.
+  Collapse optional details and organise Settings into two readable sections.
+
 ## 0.8.1 — 16 October 2026
 
 - Complete the MolStat-style install/start launchers for Python FELLES via Ivanti

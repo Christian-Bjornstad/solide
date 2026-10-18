@@ -18,7 +18,6 @@ def setup_window(tmp_path):
     window.session = Session(analyses=[opa, ion], variants=[first, second])
     window.config_path = tmp_path / 'config.json'
     window.session_path = tmp_path / 'review.solide.json'
-    window.output_dir.setText(str(tmp_path))
     window.refresh();window.nav.setCurrentRow(1)
     return app, window, first, second
 
@@ -90,6 +89,7 @@ def test_export_active_analysis_and_optional_attachment(monkeypatch, tmp_path):
     calls = []; launched = []
     monkeypatch.setattr(window, 'launch', lambda worker: launched.append(worker))
     monkeypatch.setattr(gui, 'export_analysis', lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(gui.QFileDialog, 'getExistingDirectory', lambda *args: str(tmp_path))
     try:
         window.analysis_selector.setCurrentIndex(1); window.include_evidence.setChecked(False)
         window.export(); launched[0].fn()
@@ -135,6 +135,7 @@ def test_compact_large_text_keeps_detail_actions_below_variant_table(tmp_path):
     try:
         window.text_size.setCurrentIndex(window.text_size.findData(18))
         window.resize(1050,700);window.show();QTest.qWait(50)
+        window.details_toggle.setChecked(True);app.processEvents()
         tabs=window.findChild(QTabWidget)
         table_bottom=window.variant_table.mapTo(window,QPoint(0,window.variant_table.height())).y()
         tabs_top=tabs.mapTo(window,QPoint(0,0)).y()

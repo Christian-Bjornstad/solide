@@ -5,13 +5,102 @@ import hashlib
 import json
 from pathlib import Path
 import time
-from urllib.parse import urlencode,quote
+import re
+from urllib.parse import urlencode,quote,urlsplit
 
 from .nomenclature import validate_spliceai_response
 from ._vendor.archer.services.edge_cdp import sync_edge_cdp
 from ._vendor.archer.services.capture_validation import validate_capture
 
 _SCORES=('DS_AG','DS_AL','DS_DG','DS_DL','DP_AG','DP_AL','DP_DG','DP_DL')
+
+
+def validate_brca_exchange_capture(evidence:dict,state:dict)->None:
+    """Bind the visible current record to the independently verified API result."""
+    raw=evidence.get('raw',{});identity=raw.get('identity_verification',{})
+    if (evidence.get('status')!='found' or identity.get('accepted') is not True
+            or not identity.get('requested') or identity.get('requested')!=identity.get('returned')):
+        raise ValueError('BRCA Exchange API identity is not confirmed.')
+    row=raw.get('variant',{});variant_id=row.get('id')
+    if type(variant_id) is not int or variant_id<=0 or str(variant_id)!=evidence.get('accession'):
+        raise ValueError('BRCA Exchange source record ID is not confirmed.')
+    url=urlsplit(state.get('url',''))
+    if (url.scheme!='https' or url.netloc!='brcaexchange.org'
+            or not re.fullmatch(r'/variant/(?:[1-9]\d*|CA\d+)/?',url.path)
+            or url.query or url.fragment):
+        raise ValueError('BRCA Exchange screenshot is not on a variant record.')
+    hgvs=row.get('HGVS_cDNA','')
+    if hgvs.startswith('c.'):hgvs=row.get('Reference_Sequence','')+':'+hgvs
+    match=re.fullmatch(r'((?:NM|NR)_\d+\.\d+):(c\.\S+)',hgvs)
+    if not match or not row.get('Genomic_HGVS_37'):
+        raise ValueError('BRCA Exchange record lacks a complete screenshot identity.')
+    expected={'gene':row.get('Gene_Symbol'),'transcript':match[1],'coding':match[2],
+              'genomic_grch37':row['Genomic_HGVS_37'],'classification':evidence.get('clinical_significance','')}
+    if expected['classification']!=row.get('Pathogenicity_expert',''):
+        raise ValueError('BRCA Exchange source classification differs from the API record.')
+    if any(state.get(field)!=value for field,value in expected.items()):
+        raise ValueError('BRCA Exchange visible gene, versioned HGVS, genome or classification differs from the API result.')
+    evaluated=row.get('Date_last_evaluated_ENIGMA')
+    if evaluated and evaluated!='-':
+        api_date=datetime.fromisoformat(evaluated.replace('Z','+00:00')).date()
+        page_date=datetime.strptime(state.get('evaluated',''),'%d %B %Y').date()
+        if api_date!=page_date:
+            raise ValueError('BRCA Exchange visible evaluation date differs from the API result.')
+    if not state.get('names_visible') or not state.get('classification_visible'):
+        raise ValueError('BRCA Exchange current variant and ENIGMA panels are not visible.')
+
+
+def capture_brca_exchange(evidence:dict,directory:Path,*,background=True,checkpoint=lambda:None,progress=lambda text:None)->dict:
+    """Capture current names and ENIGMA evidence, excluding historical versions."""
+    variant_id=evidence.get('raw',{}).get('variant',{}).get('id')
+    if type(variant_id) is not int or variant_id<=0:
+        raise ValueError('BRCA Exchange source record ID is missing.')
+    url=f'https://brcaexchange.org/variant/{variant_id}'
+    if evidence.get('url')!=url:
+        raise ValueError('BRCA Exchange result URL does not match its verified source ID.')
+    directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
+    progress('BRCA Exchange: capturing the verified variant and ENIGMA classification')
+    with sync_edge_cdp() as runtime:
+        context=runtime.chromium.launch_persistent_context(str(Path.home()/'.solide'/'browser_profiles'/'BRCAExchange'),
+            background=background,viewport={'width':1600,'height':1000})
+        page=context.pages[0] if context.pages else context.new_page();checkpoint();page.goto(url)
+        deadline=time.monotonic()+60;state={}
+        while time.monotonic()<deadline:
+            checkpoint()
+            state=page.evaluate("""() => {
+                document.querySelectorAll('.variant-detail-group .row-value-truncated').forEach(el=>{
+                    el.style.whiteSpace='normal';el.style.overflow='visible';el.style.textOverflow='clip';
+                    el.style.maxWidth='none';el.style.wordBreak='break-word';
+                });
+                const groups=[...document.querySelectorAll('.variant-detail-group')];
+                const group=title=>groups.find(g=>g.querySelector('.card-header .title')?.innerText.trim()===title);
+                const names=group('Variant Names'),clinical=group('Clinical Significance (ENIGMA)');
+                const value=(g,label)=>{const row=[...(g?.querySelectorAll('tr')||[])].find(r=>r.querySelector('.help-target')?.innerText.trim()===label);
+                    return row?.querySelector('.row-value,.row-value-truncated')?.innerText.trim()||'';};
+                const visible=g=>!!g && g.getBoundingClientRect().height>0 && !!g.querySelector('.collapse.show');
+                const container=names?.closest('.container'),box=container?.getBoundingClientRect();
+                const bottom=Math.max(names?.getBoundingClientRect().bottom||0,clinical?.getBoundingClientRect().bottom||0);
+                return {url:location.href,gene:value(names,'Gene'),transcript:value(names,'Transcript Identifier'),
+                    coding:value(names,'HGVS Nucleotide'),genomic_grch37:value(names,'Genomic Nomenclature (GRCh37)'),
+                    classification:value(clinical,'Clinical Significance'),evaluated:value(clinical,'Date Last Evaluated'),
+                    names_visible:visible(names),classification_visible:visible(clinical),
+                    clip:box?{x:Math.max(0,box.x),y:Math.max(0,box.y),width:box.width,height:bottom-box.y+8}:null};
+            }""")
+            if state.get('gene') and state.get('transcript') and state.get('names_visible') and state.get('classification_visible'):break
+            page.wait_for_timeout(250)
+        validate_brca_exchange_capture(evidence,state)
+        clip=state.get('clip')
+        if not clip or clip['width']<=0 or clip['height']<=0:
+            raise ValueError('BRCA Exchange screenshot panel geometry is unavailable.')
+        path=directory/f'{variant_id}-brca-exchange.png';page.screenshot(path=str(path),clip=clip)
+        if not validate_capture(path).valid:
+            raise ValueError('BRCA Exchange screenshot is unreadable; capture again.')
+        metadata={'url':state['url'],'requested_url':url,'captured_at':datetime.now(timezone.utc).isoformat(),
+                  'variant_id':variant_id,'identity_confirmed':True,'classification_confirmed':True,
+                  'visible_record':{key:value for key,value in state.items() if key!='clip'},
+                  'screenshots':[{'path':str(path),'label':'BRCA Exchange · variant identity and ENIGMA classification'}]}
+        (directory/f'{variant_id}-brca-exchange.capture.json').write_text(json.dumps(metadata,indent=2),encoding='utf8')
+        return metadata
 
 
 def spliceai_url(data:dict)->str:
@@ -82,7 +171,13 @@ def capture_spliceai(data:dict,directory:Path,*,background=True,checkpoint=lambd
                 .filter(el=>el.getBoundingClientRect().height>0).length})""")
         validate_spliceai_dom(data,visible)
         specs=[]
-        form=page.locator('#search-box').evaluate("el => el.closest('.ui.form')?.getBoundingClientRect().toJSON()")
+        form=page.locator('#search-box').evaluate("""el => {
+            const form=el.closest('.ui.form');if(!form)return null;
+            const box=form.getBoundingClientRect();
+            const right=Math.max(box.right,...[...form.querySelectorAll('label,input,button,.ui.checkbox')]
+                .map(child=>child.getBoundingClientRect().right));
+            return {x:box.x,y:box.y,width:right-box.x+8,height:box.height};
+        }""")
         if not form or form.get('width',0)<=0 or form.get('height',0)<=0:
             raise ValueError('SpliceAI query/settings panel is unavailable. Capture again.')
         path=directory/f'{stem}-spliceai-query.png';page.screenshot(path=str(path),clip=form)

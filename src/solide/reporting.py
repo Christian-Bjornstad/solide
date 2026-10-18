@@ -1,6 +1,6 @@
 """Versioned Excel reports produced from the app's reviewed session."""
 from __future__ import annotations
-from datetime import datetime,timezone
+from datetime import datetime
 from dataclasses import dataclass
 import hashlib
 import json
@@ -18,6 +18,8 @@ from .report_layout import safe_text,add_row,original_row,style_table,title,stat
 from .report_layout import (VPM_COLORS,vpm_base_sheet,vpm_border,vpm_title,vpm_section,
                             vpm_header,vpm_info_row,vpm_put_image)
 from . import __version__
+from .report_language import report_text,capture_caption
+from .localtime import oslo_now, oslo_datetime, EXCEL_DATETIME_FORMAT
 
 STATUS={'found':'Found','verified':'Verified','not_found':'Not found','not_applicable':'Not applicable',
     'needs_review':'Review required','error':'Error','timeout':'Timeout','identity_mismatch':'Identity mismatch',
@@ -38,8 +40,8 @@ def source_classification(evidence):
 
 
 def captured_time(value):
-    try:return datetime.fromisoformat(value.replace('Z','+00:00')).astimezone(timezone.utc).replace(tzinfo=None)
-    except (ValueError,AttributeError):return None
+    try:return oslo_datetime(value).replace(tzinfo=None)
+    except (ValueError,TypeError,OverflowError):return None
 
 
 def ordered_evidence(variant):
@@ -159,7 +161,7 @@ def evidence_field(sheet,row,label,value):
         lines=max(sum(max(1,(len(line)+99)//100) for line in chunk.split('\n')),
                   (len(str(sheet.cell(row,1).value))+17)//18)
         sheet.row_dimensions[row].height=max(30,min(390,16*lines+10))
-        if isinstance(value,datetime):cell.number_format='yyyy-mm-dd hh:mm'
+        if isinstance(value,datetime):cell.number_format=EXCEL_DATETIME_FORMAT
         if label=='Source URL' and text.startswith(('https://','http://')):
             cell.hyperlink=text;cell.style='Hyperlink';cell.alignment=Alignment(wrap_text=True,vertical='top')
         row+=1
@@ -177,12 +179,12 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     selected=[v for v in variants if v.selected]
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^\w.-]','_',patient).strip('.')[:70] or 'patient'
-    generated=datetime.now().astimezone();report_id=uuid.uuid4().hex[:8]
+    generated=oslo_now();report_id=uuid.uuid4().hex[:8]
     path=directory/f'{stem}_{hashlib.sha256(patient.encode()).hexdigest()[:6]}_Solide_{generated:%Y%m%d_%H%M%S}_{report_id}.xlsx'
     w=Workbook();w.properties.identifier='solide:variant-review-report'
     overview=w.active;overview.title='Overview';title(overview,'SOLIDE',8)
     add_row(overview,['Patient / sample',patient,'MTBP tissue',session.tissue(patient),'Report ID',report_id,'Export scope',scope_note(variants)])
-    add_row(overview,['Generated (UTC)',generated.astimezone(timezone.utc).replace(tzinfo=None),'App version',__version__,'Report format',3])
+    add_row(overview,['Generated (Oslo)',generated.replace(tzinfo=None),'App version',__version__,'Report format',3])
     assemblies=', '.join(sorted({v.assembly for v in variants}))
     add_row(overview,['Assembly',assemblies,'Imported rows',len(variants),'Selected variants',len(selected),'Failed QC rows',
         sum(any(f.status=='Failed' for f in qc_flags(v)) for v in variants)])
@@ -197,7 +199,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     widths={'A':12,'B':35,'C':9,'D':11,'E':14,'F':22,'G':17,'H':24}
     for column,width in widths.items():overview.column_dimensions[column].width=width
     overview.freeze_panes='C6';overview.sheet_view.zoomScale=90
-    overview.cell(3,2).number_format='yyyy-mm-dd hh:mm'
+    overview.cell(3,2).number_format=EXCEL_DATETIME_FORMAT
     for row,v in enumerate(selected,6):
         overview.cell(row,3).number_format='0.00" %"';overview.cell(row,4).number_format='#,##0'
         lines=max(sum(max(1,(len(line)+int(widths[column])-1)//int(widths[column]))
@@ -231,14 +233,14 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     add_row(detail,['Patient / sample',patient,'Assembly',assemblies])
     detail.cell(3,1,'App assessments and source assertions are recorded separately.');detail.merge_cells('A3:H3')
     internal_link(detail.cell(4,1),'Overview',label='Back to findings')
-    add_row(detail,['Gene','Variant','Classification','Report decision','Reviewer','Reviewed at (UTC)','Quality','Evidence'])
+    add_row(detail,['Gene','Variant','Classification','Report decision','Reviewer','Reviewed at (Oslo)','Quality','Evidence'])
     for v in selected:add_row(detail,[v.gene,v.corrected_hgvs or v.coding or v.protein,v.classification,v.report_decision,
         v.reviewer,captured_time(v.reviewed_at),'; '.join(f.status for f in qc_flags(v)) or 'No row flags','Open evidence'])
     style_table(detail,5,'SolideEvidenceIndex')
     for column in 'ABCDEFGH':detail.column_dimensions[column].width=18
     detail.freeze_panes='A6';detail.sheet_view.zoomScale=90
     for row in range(6,detail.max_row+1):
-        detail.row_dimensions[row].height=48;detail.cell(row,6).number_format='yyyy-mm-dd hh:mm'
+        detail.row_dimensions[row].height=48;detail.cell(row,6).number_format=EXCEL_DATETIME_FORMAT
     cursor=detail.max_row+3;anchors={};source_anchors={};full_reports={};full_links=[]
     for index,v in enumerate(selected,6):
         anchors[v.id]=cursor
@@ -255,7 +257,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
             ('Type / call',' / '.join(filter(None,[v.kind,v.call]))),('AF / coverage',f'{v.af_percent if v.af_percent is not None else "Unknown"}% / {v.coverage if v.coverage is not None else "Unknown"}'),
             ('Imported variant ID',v.variant_id or original_value(v,'Variant ID')),('Imported ClinVar',original_value(v,'ClinVar')),
             ('Classification',v.classification),('Report decision',v.report_decision),('Reviewer',v.reviewer),
-            ('Reviewed at (UTC)',captured_time(v.reviewed_at)),('Assessment',v.comment),
+            ('Reviewed at (Oslo)',captured_time(v.reviewed_at)),('Assessment',v.comment),
             ('Required checks',', '.join(review_reasons(v))),('Quality', '\n'.join(f'{f.category}: {f.status} — {f.message}' for f in qc_flags(v)) or 'No row flags'),
             ('Source provenance',f'{Path(v.source_file).name} | sheet {v.raw.get("_sheet", "")} | row {v.source_row}'),
             ('Source SHA256',v.source_hash),('Row ID',v.id)]
@@ -271,7 +273,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
             status_cell(detail.cell(cursor-1,2),assessment.label)
             for label,value in [('Source result',STATUS.get(e.get('status'),e.get('status','Unknown'))),
                 ('Source classification',source_classification(e)),('Accession',e.get('accession','')),
-                ('Captured at (UTC)',captured_time(e.get('captured_at',''))),('Source URL',e.get('url','')),('Summary',e.get('summary',''))]:
+                ('Captured at (Oslo)',captured_time(e.get('captured_at',''))),('Source URL',e.get('url','')),('Summary',e.get('summary',''))]:
                 if value not in (None,''):cursor=evidence_field(detail,cursor,label,value)
             data=e.get('raw',{});images=data.get('screenshots',[]) or ([{'path':data['screenshot'],'label':source}] if data.get('screenshot') else [])
             for label,value in service_fields(source,data):cursor=evidence_field(detail,cursor,label,value)
@@ -291,7 +293,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     for number,(full,e) in enumerate(full_reports.items(),1):
         full_anchors[full]=cursor;cursor=section_heading(detail,cursor,f'MTBP full report {number}')
         internal_link(detail.cell(cursor,1),'Evidence',5,label='Evidence index');cursor+=1
-        cursor=evidence_field(detail,cursor,'Captured at (UTC)',captured_time(e.get('captured_at','')))
+        cursor=evidence_field(detail,cursor,'Captured at (Oslo)',captured_time(e.get('captured_at','')))
         if valid_capture(full):cursor=put_image(detail,full,cursor,'MTBP full report')
         else:cursor=evidence_field(detail,cursor,'Capture','Full report screenshot missing or unreadable. Capture again.')
         cursor+=2
@@ -300,7 +302,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
 
     searches=w.create_sheet('Searches')
     add_row(searches,['Gene','Variant','Source','Result','Match assessment','Classification from source','Accession',
-        'Captured at (UTC)','Tissue','Source URL','Summary','Evidence','Row ID','JSON response'])
+        'Captured at (Oslo)','Tissue','Source URL','Summary','Evidence','Row ID','JSON response'])
     for v in selected:
         for source,e in ordered_evidence(v):
             assessment=assess_evidence(v,e,session)
@@ -308,7 +310,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
                 assessment.label,source_classification(e),e.get('accession',''),captured_time(e.get('captured_at','')),
                 e.get('tissue',''),e.get('url',''),e.get('summary',''),'Open evidence',v.id,
                 json.dumps(e.get('raw',{}),ensure_ascii=False,default=str)])
-            row=searches.max_row;searches.cell(row,8).number_format='yyyy-mm-dd hh:mm'
+            row=searches.max_row;searches.cell(row,8).number_format=EXCEL_DATETIME_FORMAT
             url=e.get('url','')
             if isinstance(url,str) and url.startswith(('https://','http://')):searches.cell(row,10).hyperlink=url
             internal_link(searches.cell(row,12),'Evidence',source_anchors[v.id,source])
@@ -454,9 +456,9 @@ def _main_findings(workbook,analysis,variants,generated):
     sheet=workbook.active;sheet.title='Findings';title(sheet,f'{analysis.profile} variant review',8)
     add_row(sheet,['Sample / dataset',analysis.patient,'Profile',analysis.profile,'Assay',analysis.assay])
     pending=sum(variant.report_decision=='Pending' for variant in selected)
-    add_row(sheet,['Generated (UTC)',generated,'Genome',analysis.assembly,'Review state',
+    add_row(sheet,['Generated (Oslo)',generated,'Genome',analysis.assembly,'Review state',
                    f'Draft: {pending} pending' if pending else 'Recorded app assessments'])
-    sheet.cell(3,2).number_format='yyyy-mm-dd hh:mm'
+    sheet.cell(3,2).number_format=EXCEL_DATETIME_FORMAT
     add_row(sheet,['Selected variants',len(selected)])
     records=[[variant.gene,variant.transcript,variant.corrected_hgvs or variant.coding,variant.protein,
               variant.af_percent,variant.coverage,variant.classification,variant.report_decision] for variant in selected]
@@ -483,7 +485,7 @@ def _main_findings(workbook,analysis,variants,generated):
         for variant in notes:
             end=evidence_field(sheet,end,'Variant',': '.join(filter(None,[variant.gene,variant.corrected_hgvs or variant.coding or variant.protein])))
             for label,value in [('Lab classification',variant.classification),('Decision',variant.report_decision),
-                                ('Reviewer',variant.reviewer),('Reviewed at (UTC)',captured_time(variant.reviewed_at)),
+                                ('Reviewer',variant.reviewer),('Reviewed at (Oslo)',captured_time(variant.reviewed_at)),
                                 ('Assessment',variant.comment)]:
                 if value not in (None,''):end=evidence_field(sheet,end,label,value)
             end+=1
@@ -548,13 +550,14 @@ def _quality_sections(workbook,analysis,variants):
     _base_compact(sheet,widths);sheet.freeze_panes='A4';sheet.print_area=f'A1:H{max(sheet.max_row,row)}'
 
 
-def _raw_analysis_sheet(workbook,variants,analysis):
-    sheet=workbook.create_sheet('Raw data');originals=[raw_values(variant) for variant in variants]
+def _raw_analysis_sheet(workbook,variants,analysis,*,norwegian=False):
+    sheet=workbook.create_sheet('Rådata' if norwegian else 'Raw data');originals=[raw_values(variant) for variant in variants]
     keys=list(dict.fromkeys(key for values in originals for key in values))
     technical=['Solide Row ID','Selected','Source row','Source file','Source sheet','Assembly','Analysis ID','Source SHA256']
+    if norwegian:technical=[report_text(label) for label in technical]
     occupied={key.casefold() for key in keys}
     for index,name in enumerate(technical):
-        while name.casefold() in occupied:name+=' (provenance)'
+        while name.casefold() in occupied:name+=' (kildedata)' if norwegian else ' (provenance)'
         technical[index]=name;occupied.add(name.casefold())
     add_row(sheet,[*keys,*technical])
     for variant,values in zip(variants,originals):
@@ -566,11 +569,12 @@ def _raw_analysis_sheet(workbook,variants,analysis):
     style_table(sheet,name='SolideAnalysisRawData');sheet.sheet_state='hidden'
 
 
-def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,analysis):
-    sheet=workbook.create_sheet('Sources');title(sheet,'Source evidence',7)
-    sheet.merge_cells('A2:G2');sheet.cell(2,1,'Original rows: right-click a worksheet tab and choose Unhide → Raw data.').alignment=Alignment(wrap_text=True)
+def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,analysis,*,norwegian=False):
+    tr=report_text if norwegian else lambda value:value
+    sheet=workbook.create_sheet('Kilder' if norwegian else 'Sources');title(sheet,tr('Source evidence'),7)
+    sheet.merge_cells('A2:G2');sheet.cell(2,1,tr('Original rows: right-click a worksheet tab and choose Unhide → Raw data.')).alignment=Alignment(wrap_text=True)
     sheet.row_dimensions[2].height=30
-    sheet.merge_cells('A3:G3');sheet.cell(3,1,'Source assertions are separate from laboratory assessments. Full responses and provenance are retained in hidden columns.').alignment=Alignment(wrap_text=True)
+    sheet.merge_cells('A3:G3');sheet.cell(3,1,tr('Source assertions are separate from laboratory assessments. Full responses and provenance are retained in hidden columns.')).alignment=Alignment(wrap_text=True)
     sheet.row_dimensions[3].height=30
     items=[]
     for variant in variants:
@@ -579,14 +583,14 @@ def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,anal
     for variant,source,item,assessment in items:
         url=_public_source_url(source,item.get('url',''));assertion=source_classification(item)
         records.append([variant.gene,variant.corrected_hgvs or variant.coding or variant.protein,source,
-            assessment.label,assertion[:120]+('… (full assertion below)' if len(assertion)>120 else ''),
+            tr(assessment.label),assertion[:120]+(('… (full assertion below)' if not norwegian else '… (se full tekst)') if len(assertion)>120 else ''),
             captured_time(item.get('captured_at','')),'',url,'',variant.id,item.get('accession',''),'',
             variant.source_row,Path(variant.source_file).name,analysis.id,variant.source_hash])
-    row=_table_region(sheet,5,['Gene','Variant','Source','Match assessment','Source assertion','Captured (UTC)','Evidence',
-        'Source URL','Summary','Row ID','Accession','JSON response','Source row','Source file','Analysis ID','Source SHA256'],
+    row=_table_region(sheet,5,[tr(label) for label in ['Gene','Variant','Source','Match assessment','Source assertion','Captured (Oslo)','Evidence',
+        'Source URL','Summary','Row ID','Accession','JSON response','Source row','Source file','Analysis ID','Source SHA256']],
         records,[13,28,17,22,32,21,18],'SolideAnalysisSources')
     for current,(variant,source,item,assessment) in enumerate(items,6):
-        status_cell(sheet.cell(current,4),assessment.label);sheet.cell(current,6).number_format='yyyy-mm-dd hh:mm'
+        status_cell(sheet.cell(current,4),assessment.label);sheet.cell(current,4,tr(assessment.label));sheet.cell(current,6).number_format=EXCEL_DATETIME_FORMAT
         sheet.row_dimensions[current].height=_text_height(records[current-6][:7],[13,28,17,22,32,21,18],44)
         for column,field in [(9,_exported_response(source,item.get('summary',''))),
                              (12,json.dumps(_exported_response(source,item.get('raw',{})),ensure_ascii=False,default=str))]:
@@ -594,36 +598,36 @@ def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,anal
                 cell=sheet.cell(current,column,str(field or ''));cell.data_type='s';cell.quotePrefix=str(field or '').startswith(('=','+','-','@'))
         anchor=anchors.get((variant.id,source))
         if attachment_name and anchor:
-            _link(sheet.cell(current,7),f"{attachment_name}#'{anchor[0].replace(chr(39),chr(39)*2)}'!A{anchor[1]}",'Open attachment')
+            _link(sheet.cell(current,7),f"{attachment_name}#'{anchor[0].replace(chr(39),chr(39)*2)}'!A{anchor[1]}",tr('Open attachment'))
         elif _capture_export_allowed(variant,item,scoped):
             captures=_capture_records(item)
             capture=next((record['path'] for record in captures if valid_capture(record['path'])),None)
-            if capture:_link(sheet.cell(current,7),_relative_target(capture,directory),'Open local capture')
-            elif _public_source_url(source,item.get('url','')):_link(sheet.cell(current,7),item['url'],'Open source')
-        if sheet.cell(current,7).value in (None,''):sheet.cell(current,7,'Review source' if assessment.label not in {'Not applicable','No match'} else assessment.label)
+            if capture:_link(sheet.cell(current,7),_relative_target(capture,directory),tr('Open local capture'))
+            elif _public_source_url(source,item.get('url','')):_link(sheet.cell(current,7),item['url'],tr('Open source'))
+        if sheet.cell(current,7).value in (None,''):sheet.cell(current,7,tr('Review source') if assessment.label not in {'Not applicable','No match'} else tr(assessment.label))
     from openpyxl.utils import get_column_letter
     for column in range(8,17):sheet.column_dimensions[get_column_letter(column)].hidden=True
     if not records:
-        sheet.merge_cells('A6:G6');sheet.cell(6,1,'No database searches have been recorded.');sheet.row_dimensions[6].height=30
+        sheet.merge_cells('A6:G6');sheet.cell(6,1,tr('No database searches have been recorded.'));sheet.row_dimensions[6].height=30
     metadata_row=max(row+2,9)
     for variant,source,item,assessment in items:
         full=json.dumps(_exported_response(source,item.get('raw',{})),ensure_ascii=False,default=str)
         summary=_exported_response(source,item.get('summary',''));assertion=source_classification(item)
         # Hidden literal rows have a stable source-result key; joining the
         # adjacent chunks reconstructs even multi-cell JSON exactly.
-        for label,value in [('JSON response',full),('Full summary',summary),('Full source assertion',assertion)]:
+        for label,value in [(tr('JSON response'),full),(tr('Full summary'),summary),(tr('Full source assertion'),assertion)]:
             original_row(sheet,[None]*7+[variant.id,source,label])
             storage=sheet.max_row
             _literal_chunks(sheet,storage,11,value);sheet.row_dimensions[storage].hidden=True
         metadata_row=sheet.max_row+2
         if len(assertion)>120 or len(summary)>32767:
             metadata_row=evidence_field(sheet,metadata_row,f'{variant.gene} / {source}',variant.corrected_hgvs or variant.coding or variant.protein)
-            if len(assertion)>120:metadata_row=evidence_field(sheet,metadata_row,'Full source assertion',assertion)
-            if len(summary)>32767:metadata_row=evidence_field(sheet,metadata_row,'Full summary',summary)
-    metadata_row=evidence_field(sheet,metadata_row,'Analysis',f'{analysis.profile} / {analysis.assay}')
-    metadata_row=evidence_field(sheet,metadata_row,'Source file',Path(analysis.source_file or variants[0].source_file).name)
+            if len(assertion)>120:metadata_row=evidence_field(sheet,metadata_row,tr('Full source assertion'),assertion)
+            if len(summary)>32767:metadata_row=evidence_field(sheet,metadata_row,tr('Full summary'),summary)
+    metadata_row=evidence_field(sheet,metadata_row,tr('Analysis'),f'{analysis.profile} / {analysis.assay}')
+    metadata_row=evidence_field(sheet,metadata_row,tr('Source file'),Path(analysis.source_file or variants[0].source_file).name)
     if analysis.metadata:
-        original_row(sheet,[None]*7+[analysis.id,'analysis','Source metadata'])
+        original_row(sheet,[None]*7+[analysis.id,'analysis',tr('Source metadata')])
         storage=sheet.max_row
         _literal_chunks(sheet,storage,11,json.dumps(analysis.metadata,ensure_ascii=False,default=str))
         sheet.row_dimensions[storage].hidden=True
@@ -688,7 +692,7 @@ def _evidence_attachment(analysis,variants,scoped,directory):
                             ('Reviewed HGVS',variant.corrected_hgvs),('Reviewed allele',variant.controlled_genomic),
                             ('Genomic identity',' | '.join(filter(None,[variant.assembly,variant.locus,variant.ref,variant.alt]))),
                             ('Lab classification',variant.classification),('Decision',variant.report_decision),
-                            ('Reviewer',variant.reviewer),('Reviewed at (UTC)',captured_time(variant.reviewed_at)),
+                            ('Reviewer',variant.reviewer),('Reviewed at (Oslo)',captured_time(variant.reviewed_at)),
                             ('Assessment',variant.comment),('Source row',variant.source_row),('Source SHA256',variant.source_hash)]:
             if value not in (None,''):row=evidence_field(sheet,row,label,value)
         row+=1
@@ -697,7 +701,7 @@ def _evidence_attachment(analysis,variants,scoped,directory):
             anchors[variant.id,source]=(name,row);row=section_heading(sheet,row,source)
             assessment=assess_evidence(variant,item,scoped)
             row=evidence_field(sheet,row,'Match assessment',assessment.label);status_cell(sheet.cell(row-1,2),assessment.label)
-            for label,value in [('Source assertion',source_classification(item)),('Captured (UTC)',captured_time(item.get('captured_at',''))),
+            for label,value in [('Source assertion',source_classification(item)),('Captured (Oslo)',captured_time(item.get('captured_at',''))),
                                 ('Accession',item.get('accession','')),('Source URL',_public_source_url(source,item.get('url',''))),
                                 ('Summary',_exported_response(source,item.get('summary','')))]:
                 if value not in (None,''):row=evidence_field(sheet,row,label,value)
@@ -719,7 +723,7 @@ def _evidence_attachment(analysis,variants,scoped,directory):
         internal_link(mtbp.cell(2,1),'Index',label='Evidence index');row=4;full_anchors={}
         for number,(key,(path,item)) in enumerate(full_reports.items(),1):
             full_anchors[key]=row;row=section_heading(mtbp,row,f'MTBP full report {number}')
-            row=evidence_field(mtbp,row,'Captured (UTC)',captured_time(item.get('captured_at','')))
+            row=evidence_field(mtbp,row,'Captured (Oslo)',captured_time(item.get('captured_at','')))
             _link(mtbp.cell(row,1),_relative_target(path,directory),'Open original PNG');row+=2
             if valid_capture(path):row=put_image(mtbp,path,row,'MTBP report',crop_top=mtbp_content_top(path))
             else:row=evidence_field(mtbp,row,'Capture status','Full report missing or unreadable: capture again.')
@@ -782,7 +786,7 @@ def export_analysis_compact(session:Session,analysis_id:str,directory:Path,inclu
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^\w.-]','_',analysis.patient).strip('.')[:60] or 'source'
     profile=re.sub(r'[^\w.-]','_',analysis.profile)
-    generated=datetime.now(timezone.utc).replace(tzinfo=None);token=uuid.uuid4().hex[:10]
+    generated=oslo_now().replace(tzinfo=None);token=uuid.uuid4().hex[:10]
     base=f'{stem}_{profile}_{generated:%Y%m%d_%H%M%S}_{token}'
     report_path=directory/f'{base}_Report.xlsx';attachment_path=directory/f'{base}_Evidence.xlsx'
     attachment,anchors=_evidence_attachment(analysis,variants,scoped,directory) if include_evidence else (None,{})
@@ -801,27 +805,28 @@ def _vpm_compact(variant,source,scoped):
     item=variant.evidence.get(source)
     if not item:return ''
     assessment=assess_evidence(variant,item,scoped).label
-    if assessment=='Not applicable':return ''
-    if assessment=='No match':return 'Not found'
-    if assessment=='Outdated':return 'Outdated'
+    if assessment=='Not applicable':
+        return 'Ikke kjørt' if source=='SpliceAI' else ''
+    if assessment=='No match':return 'Ingen treff'
+    if assessment=='Outdated':return 'Utdatert'
     raw=item.get('raw',{})
     if source=='Mutalyzer' and evidence_is_current(variant,item,scoped.tissue_for(variant),scoped):
         checked=raw.get('nomenclature_assessment') or {}
         if checked.get('identity_confirmed') is True and checked.get('status') in {'Unchanged','Normalized'}:
-            return checked.get('status')
-        return 'Check variant'
+            return 'Uendret' if checked.get('status')=='Unchanged' else 'Normalisert'
+        return 'Kontroller variant'
     if assessment not in {'Verified match','Review match'}:
-        return 'Capture unavailable' if assessment=='Missing capture' else 'Check result'
+        return 'Bilde mangler' if assessment=='Missing capture' else 'Kontroller resultat'
     assertion=' '.join(source_classification(item).split())
     if source=='COSMIC':
         identifiers=re.findall(r'COS[MV]\d+',str(item.get('accession','')))
         for key in ('mutation_id','cosmic_id','genomic_mutation_id','legacy_mutation_id'):
             identifiers.extend(re.findall(r'COS[MV]\d+',str(raw.get(key,''))))
-        return ', '.join(dict.fromkeys(identifiers)) or 'Found'
+        return ', '.join(dict.fromkeys(identifiers)) or 'Treff'
     if source=='SpliceAI':
         scores=raw.get('response',{}).get('scores') or []
         deltas=[float(row[key]) for row in scores for key in ('DS_AG','DS_AL','DS_DG','DS_DL') if row.get(key) is not None]
-        return f'Max delta {max(deltas):.3f}' if deltas else 'Found'
+        return f'Maks. delta {max(deltas):.3f}' if deltas else 'Treff'
     if not assertion:
         for key in ('functional_relevance','oncogenicity','classification','expert_classification'):
             value=raw.get(key)
@@ -834,7 +839,7 @@ def _vpm_compact(variant,source,scoped):
                            str(raw.get('functional_evidence',''))+' '+item.get('summary',''),re.I)
         if evidence and evidence[0].casefold() not in assertion.casefold():
             assertion=' – '.join(filter(None,[assertion,' '.join(evidence[0].split())]))
-    return assertion or 'Found'
+    return assertion or 'Treff'
 
 
 def _vpm_source_url(variant,source,scoped):
@@ -859,18 +864,18 @@ def _vpm_variant_name(variant,index,counts,used):
 def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     import textwrap
     from openpyxl.utils import get_column_letter
-    sheet=workbook.active;sheet.title='Overview';vpm_base_sheet(sheet,13)
+    sheet=workbook.active;sheet.title='Oversikt';vpm_base_sheet(sheet,13)
     sheet.sheet_properties.tabColor=VPM_COLORS['navy']
-    vpm_title(sheet,f'Solide interpretation – {analysis.patient}',13)
-    vpm_info_row(sheet,3,'Sample / dataset',analysis.patient,end_column=3)
-    vpm_info_row(sheet,4,'Generated (UTC)',generated,end_column=3);sheet.cell(4,3).number_format='yyyy-mm-dd hh:mm'
+    vpm_title(sheet,f'Solide – {analysis.patient}',13)
+    vpm_info_row(sheet,3,'Prøve',analysis.patient,end_column=3)
+    vpm_info_row(sheet,4,'Opprettet (Oslo)',generated,end_column=3);sheet.cell(4,3).number_format=EXCEL_DATETIME_FORMAT
     sheet.merge_cells('D3:M4')
     sheet.cell(3,4).alignment=Alignment(vertical='top',wrap_text=True)
     for row in sheet.iter_rows(min_row=3,max_row=4,min_col=4,max_col=13):
         for cell in row:cell.fill=PatternFill('solid',fgColor=VPM_COLORS['pale_orange'])
     for row in (3,4):sheet.row_dimensions[row].height=24
-    vpm_section(sheet,6,'Variants and significant evidence',13)
-    for column,label in enumerate(['Gene','HGVSc','HGVSp','Short evidence','Comment',*SOURCE_ORDER],1):
+    vpm_section(sheet,6,'Varianter og kildefunn',13)
+    for column,label in enumerate(['Gen','HGVSc','HGVSp','Kildefunn','Kommentar',*SOURCE_ORDER],1):
         vpm_header(sheet.cell(7,column),label)
     widths=[14,31,25,52,32,*([22]*len(SOURCE_ORDER))]
     for row,variant in enumerate(selected,8):
@@ -898,7 +903,7 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     sheet.auto_filter.ref=f'A7:M{max(7,7+len(selected))}';sheet.freeze_panes='A8'
     sheet.print_area=f'A1:M{max(13,8+len(selected))}'
     if not selected:
-        sheet.merge_cells('A8:M8');sheet.cell(8,1,'No variants selected.')
+        sheet.merge_cells('A8:M8');sheet.cell(8,1,'Ingen varianter valgt.')
         sheet.cell(8,1).alignment=Alignment(wrap_text=True);sheet.row_dimensions[8].height=42
 
 
@@ -906,10 +911,10 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
     sheet=workbook.create_sheet(name);vpm_base_sheet(sheet)
     vpm_title(sheet,' | '.join(filter(None,[variant.gene,variant.coding,variant.protein])))
     sheet.merge_cells('A3:L3')
-    metadata=[variant.protein,'Source transcript: '+variant.transcript if variant.transcript else '',
+    metadata=[variant.protein,'Transkript: '+variant.transcript if variant.transcript else '',
               ' | '.join(filter(None,[variant.assembly,variant.locus,variant.ref,variant.alt])),
               f'AF {variant.af_percent:.2f}%' if variant.af_percent is not None else '',
-              f'Depth {variant.coverage:g}' if variant.coverage is not None else '',variant.kind]
+              f'Dekning {variant.coverage:g}' if variant.coverage is not None else '',variant.kind]
     sheet.cell(3,1,' | '.join(filter(None,metadata)))
     sheet.cell(3,1).font=Font(color=VPM_COLORS['muted'],italic=True)
     sheet.cell(3,1).alignment=Alignment(wrap_text=True)
@@ -931,10 +936,10 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
         if has_full:
             full_key=str(Path(full).resolve())
             records=[record for record in records if str(Path(record['path']).resolve())!=full_key]
-        if not include_evidence:message='Images excluded.'
-        elif not allowed and item:message=_vpm_compact(variant,source,scoped)+': screenshot excluded.'
-        elif not records and has_full:message='See the combined MTBP report.'
-        elif not records:message='Screenshot not available.'
+        if not include_evidence:message='Bilder er utelatt.'
+        elif not allowed and item:message=_vpm_compact(variant,source,scoped)+': bilde utelatt.'
+        elif not records and has_full:message='Se MTBP-arket.'
+        elif not records:message='Bilde mangler.'
         else:message=''
         if message:
             sheet.merge_cells(start_row=row,start_column=1,end_row=row,end_column=12)
@@ -944,7 +949,7 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
         else:
             for record in records:
                 sheet.merge_cells(start_row=row,start_column=1,end_row=row,end_column=12)
-                caption=sheet.cell(row,1,safe_text(record['label']))
+                caption=sheet.cell(row,1,safe_text(capture_caption(record['label'])))
                 caption.font=Font(bold=True,color=VPM_COLORS['navy'])
                 caption.fill=PatternFill('solid',fgColor=VPM_COLORS['pale_blue'])
                 row=vpm_put_image(sheet,record['path'],row+1)+1
@@ -965,7 +970,7 @@ def _vpm_mtbp_sheet(workbook,analysis,full_reports):
         for column in range(1,13):sheet.cell(row,column).fill=PatternFill('solid',fgColor=VPM_COLORS['pale_blue'])
     row=6
     for path in full_reports.values():
-        row=vpm_section(sheet,row,'MTBP – combined report')
+        row=vpm_section(sheet,row,'MTBP – samlet rapport')
         row=vpm_put_image(sheet,path,row,crop_top=mtbp_content_top(path))+1
     sheet.print_area=f'A1:L{row}'
 
@@ -982,12 +987,12 @@ def export_analysis(session:Session,analysis_id:str,directory:Path,include_evide
     if analysis.profile=='Unassigned':raise ValueError('Choose OPA or Ion Torrent for this analysis before exporting.')
     variants=scoped.analysis_variants(analysis_id);selected=[variant for variant in variants if variant.selected]
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
-    generated=datetime.now(timezone.utc).replace(tzinfo=None)
+    generated=oslo_now().replace(tzinfo=None)
     stem=re.sub(r'[^\w.-]','_',analysis.patient).strip('.')[:60] or 'source'
     profile=re.sub(r'[^\w.-]','_',analysis.profile)
     path=directory/f'{stem}_{profile}_{generated:%Y%m%d_%H%M%S}_{uuid.uuid4().hex[:10]}_Report.xlsx'
     workbook=Workbook();_workbook_marker(workbook);workbook.properties.version='6'
-    used={'overview','mtbp','quality','sources','raw data'}
+    used={'oversikt','mtbp','kilder','rådata','overview','sources','raw data','quality'}
     counts=Counter((variant.gene or 'Variant').casefold() for variant in selected)
     names={variant.id:_vpm_variant_name(variant,index,counts,used) for index,variant in enumerate(selected,1)}
     full_reports={};anchors={}
@@ -996,12 +1001,12 @@ def export_analysis(session:Session,analysis_id:str,directory:Path,include_evide
         for variant in selected:
             anchors.update(_vpm_variant_sheet(workbook,names[variant.id],variant,scoped,include_evidence,full_reports))
         _vpm_mtbp_sheet(workbook,analysis,full_reports)
-        _source_rows(workbook,variants,scoped,None,{},directory,analysis)
-        sources=workbook['Sources']
+        _source_rows(workbook,variants,scoped,None,{},directory,analysis,norwegian=True)
+        sources=workbook['Kilder']
         sources.sheet_state='hidden'
-        _raw_analysis_sheet(workbook,variants,analysis)
+        _raw_analysis_sheet(workbook,variants,analysis,norwegian=True)
         # Hidden provenance is literal storage, not an Excel structured table.
-        for sheet in (sources,workbook['Raw data']):
+        for sheet in (sources,workbook['Rådata']):
             sheet.tables.clear();sheet.auto_filter.ref=None
             for row in sheet:
                 for cell in row:

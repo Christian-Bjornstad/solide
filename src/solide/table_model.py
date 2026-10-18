@@ -1,10 +1,37 @@
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt, pyqtSignal, QSortFilterProxyModel
+import csv
+import io
 from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QKeySequence
+from PyQt6.QtWidgets import QApplication, QTableView
 from .quality import review_reasons, qc_flags, kind_key
 
 COLUMNS=[('Selected','selected'),('Patient / sample','patient'),('Gene','gene'),('Transcript','transcript'),
          ('Coding','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
          ('Type','kind'),('Call','call'),('Locus','locus'),('Review needed','review'),('Comment','comment')]
+
+
+class SpreadsheetView(QTableView):
+    """Native cell selection and rectangular TSV copying for Excel."""
+
+    def keyPressEvent(self, event):
+        if event.matches(QKeySequence.StandardKey.Copy):
+            indexes = self.selectionModel().selectedIndexes()
+            if indexes:
+                rows = sorted({index.row() for index in indexes})
+                bounds = [index.column() for index in indexes]
+                columns = [column for column in range(min(bounds), max(bounds) + 1)
+                           if not self.isColumnHidden(column)]
+                selected = {(index.row(), index.column()): index for index in indexes}
+                output = io.StringIO(newline='')
+                writer = csv.writer(output, delimiter='\t', lineterminator='\n')
+                for row in range(rows[0], rows[-1] + 1):
+                    writer.writerow([selected[row, column].data()
+                        if (row, column) in selected else '' for column in columns])
+                QApplication.clipboard().setText(output.getvalue().removesuffix('\n'))
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class VariantProxy(QSortFilterProxyModel):

@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 
 from .models import Analysis, ImportResult, Session
+from .sample_identity import normalize_oum,valid_oum
 
 PROFILES = ('OPA', 'Ion Torrent', 'Unassigned')
 ASSEMBLIES = ('GRCh37', 'GRCh38', 'Unknown')
@@ -81,7 +82,7 @@ def add_analysis(session: Session, result: ImportResult, patient: str, assembly:
     source_ids = [variant.id for variant in result.variants]
     if len(set(source_ids)) != len(source_ids):
         raise ValueError('The imported source contains duplicate row IDs.')
-    patient = patient.strip()
+    patient = normalize_oum(patient) if valid_oum(patient) else patient.strip()
     assay = assay.strip() if isinstance(assay, str) and assay.strip() else 'Unknown'
     source_file, source_hash = next(iter(sources))
     ensure_analyses(session)
@@ -125,6 +126,7 @@ def rename_analysis_sample(session: Session, analysis_id: str, patient: str) -> 
     """Change only this file's binding; preserve source identity and other samples."""
     validate_analyses(session)
     if not isinstance(patient,str) or not patient.strip():raise ValueError('Enter the OUM / sample ID.')
+    patient=normalize_oum(patient) if valid_oum(patient) else patient.strip()
     analysis=session.analysis(analysis_id);rows=session.analysis_variants(analysis_id)
     if analysis.patient==patient.strip():return
     if rows:session.tissues[analysis.id]=session.tissue_for(rows[0])
