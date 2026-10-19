@@ -25,7 +25,7 @@ window.session=Session(variants=[
             af_percent=25.8,coverage=6355,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),
     Variant(patient='DEMO-001',gene='MET',transcript='NM_001174067.1',coding='c.3029C>T',protein='p.T1010I',
             af_percent=8.2,coverage=420,kind='SNV',call='PRESENT',assembly='GRCh37',selected=False),
-    Variant(patient='DEMO-001',gene='BRCA1',transcript='NM_007294.4',coding='c.5346+5C>A',
+    Variant(patient='DEMO-001',gene='KLLN,PTEN',transcript='NM_001126049.2, NM_000314.8',coding='c.-2001C>T, c.19G>A',
             af_percent=12.4,coverage=2200,kind='SNV',call='PRESENT',assembly='GRCh37',selected=True),
     Variant(patient='DEMO-002',gene='ERBB2',kind='CNV',copy_number=0.8,call='ABSENT'),
     Variant(patient='DEMO-002',gene='ALK',kind='RNAExonTiles',call='NO CALL')])

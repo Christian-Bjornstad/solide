@@ -17,8 +17,8 @@ def test_app_text_is_norwegian_but_source_assertions_and_raw_headers_are_unchang
         assert book.sheetnames==['Oversikt','EGFR','Kilder','Rådata']
         assert book['Oversikt']['A4'].value=='Opprettet (Oslo)'
         assert [c.value for c in book['Oversikt'][7]][:5]==['Gen','HGVSc','HGVSp','Kildefunn','Kommentar']
-        assert book['Oversikt']['M8'].value=='Ikke kjørt'
-        assert book['Oversikt']['G8'].value=='Bilde mangler'
+        assert book['Oversikt']['G8'].value=='Ikke kjørt'
+        assert book['Oversikt']['M8'].value=='Bilde mangler'
         assert book['Rådata']['A1'].value=='Gene'
         assert book['Rådata']['B1'].value=='Comment'
         assert book['Rådata']['B2'].value=='Original English source value'
@@ -38,5 +38,5 @@ def test_current_source_classifications_are_not_translated(tmp_path):
         analysis_id=v.analysis_id,mtbp_batch=batch_fingerprint(s,v.patient,v.analysis_id))
     v.evidence['MTBP']['raw']['patient_report_screenshot']=str(image)
     with closing(load_workbook(export_analysis(s,'analysis-a',tmp_path).report)) as book:
-        assert book['Oversikt']['G8'].value=='Benign'
-        assert book['Oversikt']['F8'].value=='Putative functionally relevant variants'
+        assert book['Oversikt']['M8'].value=='Benign'
+        assert book['Oversikt']['L8'].value=='Putative functionally relevant variants'

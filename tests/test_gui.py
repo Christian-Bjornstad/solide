@@ -107,14 +107,24 @@ def test_retry_worker_counts_only_targeted_failures(monkeypatch,tmp_path):
 
 
 def test_settings_store_password_in_vault_only(monkeypatch,tmp_path):
+    import time
     import solide.gui as gui
     stored=[]
+    class Browser:
+        login_confirmed=True
+        login_credentials_verified=True
+        def __init__(self,**kwargs):pass
+        def open_login(self,*args,**kwargs):return 'Franklin: Innlogget.'
+    monkeypatch.setattr(gui,'BrowserReviewService',Browser)
     monkeypatch.setattr(gui,'write_password',lambda *args:stored.append(args))
     monkeypatch.setattr(gui,'read_password',lambda *args:'synthetic-password-test' if stored else '')
     app=QApplication.instance() or QApplication([]);window=MainWindow()
     window.config={};window.config_path=tmp_path/'ui_config.json'
     window.account_username.setText('demo@example.org');window.account_password.setText('synthetic-password-test')
     window.save_account()
+    deadline=time.monotonic()+5
+    while window.active and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
+    assert window.active is None
     assert stored and window.account_password.text()==''
     assert 'synthetic-password-test' not in window.config_path.read_text()
     window.save_settings()
@@ -129,6 +139,8 @@ def test_edge_sign_in_still_works_when_vault_unavailable(monkeypatch,tmp_path):
     calls=[]
     def unavailable(accounts):raise RuntimeError('Vault unavailable')
     class Browser:
+        login_confirmed=True
+        login_credentials_verified=False
         def __init__(self,**kwargs):calls.append(kwargs)
         def open_login(self,source,maximum_minutes):return f'{source} sign-in confirmed; browser profile released.'
     monkeypatch.setattr(gui,'browser_credentials',unavailable)

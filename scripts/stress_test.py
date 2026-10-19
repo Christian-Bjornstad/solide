@@ -162,7 +162,8 @@ if args.phase in {'gui','all'}:
             elif action=='filter':view.search.setText(rng.choice(['','TP53','no such variant','[.*]','ÆØÅ','c.68','00OUM']))
             elif action=='sort':view.proxy.sort(rng.randrange(13),rng.choice([Qt.SortOrder.AscendingOrder,Qt.SortOrder.DescendingOrder]))
             elif action=='select':
-                name=rng.choice(['Select visible','Clear visible']);QTest.mouseClick(buttons[name],Qt.MouseButton.LeftButton)
+                if view.proxy.rowCount():view.variant_table.selectRow(rng.randrange(view.proxy.rowCount()))
+                name=rng.choice(['Bruk markerte rader','Fjern valg']);QTest.mouseClick(buttons[name],Qt.MouseButton.LeftButton)
             elif action=='check' and view.proxy.rowCount():
                 index=view.proxy.index(rng.randrange(view.proxy.rowCount()),0)
                 view.proxy.setData(index,rng.choice([Qt.CheckState.Checked,Qt.CheckState.Unchecked]),Qt.ItemDataRole.CheckStateRole)

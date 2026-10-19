@@ -34,6 +34,54 @@ def text(value) -> str:
     return '' if value is None else str(value).strip()
 
 
+def _variant_header(row) -> bool:
+    names = {text(cell).casefold() for cell in row}
+    return 'type' in names and bool(names & {'gene', 'genes'})
+
+
+def _checked_headers(row) -> list[str]:
+    headers = [text(cell) for cell in row]
+    named = [name.casefold() for name in headers if name]
+    if len(named) != len(set(named)):
+        raise ValueError('Duplicate column names found. Choose the original variant export instead of a reviewed worksheet.')
+    # Alias columns cannot silently compete for one interpreted field.
+    for aliases in ({'gene', 'genes'}, {'transcript', 'gene isoform'},
+                    {'coding', 'nucleotide change', 'nuc change'}, {'amino acid change', 'aa change'}):
+        if len(set(named) & aliases) > 1:
+            raise ValueError('Flere kolonner beskriver samme annotasjonsfelt. Kontroller kolonneoppsettet i eksporten.')
+    return headers
+
+
+_TRANSCRIPT = re.compile(r'(?:(?:NM|NR|XM|XR)_\d+(?:\.\d+)?|ENST\d+(?:\.\d+)?|LRG_\d+t\d+)')
+_REFERENCE = re.compile(r'(?:(?:N[CGMPRTWZ]|X[MRP]|AC|AP)_\d+(?:\.\d+)?|ENS[A-Z]*\d+(?:\.\d+)?|LRG_\d+(?:[tp]\d+)?)')
+_GENE_SYMBOL = re.compile(r'[A-Za-z][A-Za-z0-9]*(?:[-.][A-Za-z0-9]+)*')
+
+
+def _annotation_columns(gene_value, transcript_value, coding_value, protein_value, raw: dict) -> tuple[str, str, str]:
+    """Repair only a proven field-type inversion, retaining every source cell."""
+    gene, transcript = text(gene_value), text(transcript_value)
+    if any(value is not None and not isinstance(value, str)
+           for value in (gene_value, transcript_value, coding_value, protein_value)):
+        return gene, transcript, 'Annotasjonsfelt inneholder andre celletyper enn tekst. Kontroller kilderaden.'
+    genes = [part.strip() for part in re.split(r'[,;|]', gene)]
+    transcripts = [part.strip() for part in re.split(r'[,;|]', transcript)]
+    gene_references = [_REFERENCE.fullmatch(part) is not None for part in genes]
+    if all(_TRANSCRIPT.fullmatch(part) for part in genes) and all(_GENE_SYMBOL.fullmatch(part) for part in transcripts):
+        raw['_annotation_column_repair'] = {
+            'method': 'unambiguous_gene_transcript_swap',
+            'source_gene': gene, 'source_transcript': transcript,
+        }
+        return transcript, gene, ''
+    if any(gene_references):
+        return gene, transcript, 'Referansesekvens i genkolonnen; gen og transkript kan ikke kobles entydig.'
+    if transcript not in {'', '-', '.'} and any(_GENE_SYMBOL.fullmatch(part) for part in transcripts):
+        return gene, transcript, 'Gennavn i transkriptkolonnen; kontroller gen- og transkriptfeltene.'
+    if any(part not in {'', '-', '.'} and not (_TRANSCRIPT.fullmatch(part) or _REFERENCE.fullmatch(part))
+           for part in transcripts):
+        return gene, transcript, 'Ukjent eller ugyldig referanse i transkriptkolonnen; kontroller kilderaden.'
+    return gene, transcript, ''
+
+
 def number(value) -> float | None:
     try:
         n = float(text(value).replace('%', '').replace(',', '.'))
@@ -147,7 +195,7 @@ def load_file(path: Path) -> ImportResult:
                         if key in metadata and metadata[key]!=value:
                             raise ValueError('Motstridende metadata i TSV-filen. Kontroller eksporten.')
                         metadata[key]=value
-                if 'Type' in row and ('Gene' in row or 'Genes' in row):header_seen=True
+                if _variant_header(row):header_seen=True
                 rows.append(row);tsv_rows.append(source_row)
         except csv.Error as exc:
             raise ValueError(f'Ugyldig TSV ved linje {reader.line_num}: {exc}') from exc
@@ -157,12 +205,11 @@ def load_file(path: Path) -> ImportResult:
         raise ValueError('Choose a TSV or XLSX file.')
     assembly = normalize_assembly(metadata.get('reference', ''))
     variants = []
-    eligible=[(sheet,rows) for sheet,rows in tables if any('Type' in row and ('Gene' in row or 'Genes' in row) for row in rows)]
+    eligible=[(sheet,rows) for sheet,rows in tables if any(_variant_header(row) for row in rows)]
     if len(eligible)>1:
         raise ValueError('Multiple variant tables found. Export the original variant sheet separately to avoid duplicate review copies.')
     for sheet_name, rows in tables:
-        header_index = next((i for i, r in enumerate(rows)
-                             if 'Type' in r and ('Gene' in r or 'Genes' in r)), None)
+        header_index = next((i for i, r in enumerate(rows) if _variant_header(r)), None)
         if header_index is None:
             continue
         if not hint:
@@ -171,24 +218,27 @@ def load_file(path: Path) -> ImportResult:
                 for cell in row:
                     if re.fullmatch(r'\d{2}[A-Za-z]{3}\d+(?:_\w+)?', text(cell)):
                         hint = text(cell)
-        headers = [text(h) for h in rows[header_index]]
-        named=[h for h in headers if h]
-        if len(named)!=len({h.casefold() for h in named}):
-            raise ValueError('Duplicate column names found. Choose the original variant export instead of a reviewed worksheet.')
-        platform = 'Ion Reporter' if 'Transcript' in headers and 'Genes' in headers else 'Genexus'
+        headers = _checked_headers(rows[header_index])
+        schema = sorted(name.casefold() for name in headers)
+        platform = 'Ion Reporter' if {'transcript', 'genes'} <= set(schema) else 'Genexus'
         for offset, row in enumerate(rows[header_index + 1:], header_index + 1):
             index=tsv_rows[offset] if tsv_rows is not None else offset+1
+            if _variant_header(row):
+                repeated = _checked_headers(row)
+                if sorted(name.casefold() for name in repeated) != schema:
+                    raise ValueError(f'Rad {index}: endret kolonneoppsett i gjentatt overskrift. Eksporter én opprinnelig varianttabell.')
+                headers = repeated
+                continue
             if any(text(value) for value in row[len(headers):]):
                 raise ValueError(f'Rad {index} har flere kolonner enn overskriften. Kontroller eksporten.')
             raw = {h: cell for h, cell in zip(headers, row) if h}
-            if text(raw.get('Type'))=='Type' and text(raw.get('Gene',raw.get('Genes'))) in {'Gene','Genes'}:
-                continue
-            if not text(raw.get('Type')) or not text(raw.get('Gene', raw.get('Genes'))):
-                continue
+            lookup = {name.casefold(): value for name, value in raw.items()}
             def get(*names):
-                return next((raw[n] for n in names if n in raw), None)
+                return next((lookup[name.casefold()] for name in names if name.casefold() in lookup), None)
+            if not text(get('Type')) or not text(get('Genes', 'Gene')):
+                continue
             af = number(get('Allele Frequency %', 'Allele Frequency (%)', 'Allele Frequency'))
-            if af is not None and 'Allele Frequency' in headers:
+            if af is not None and 'allele frequency' in lookup:
                 af = round(af * 100, 10)
             if af is not None and not 0 <= af <= 100:
                 warnings.append(f'Row {index}: allele frequency outside 0–100%.')
@@ -196,10 +246,18 @@ def load_file(path: Path) -> ImportResult:
             raw['_sheet'] = sheet_name
             raw['_columns'] = headers
             raw['_values'] = list(row[:len(headers)]) + [None]*max(0,len(headers)-len(row))
+            gene, transcript, issue = _annotation_columns(
+                get('Genes', 'Gene'), get('Transcript', 'Gene Isoform'),
+                get('Coding', 'Nucleotide Change', 'Nuc Change'), get('Amino Acid Change', 'AA Change'), raw)
+            if issue:
+                raw['_annotation_issue'] = issue
+                warnings.append(f'Rad {index}: {issue}')
+            elif raw.get('_annotation_column_repair'):
+                warnings.append(f'Rad {index}: gen- og transkriptfeltene var byttet og er tolket etter celleinnholdet. Originalcellene er beholdt.')
             call = text(get('Call')) or text(get('Genotype'))
             variants.append(Variant(
                 id=hashlib.sha256(f'{digest}:{sheet_name}:{index}'.encode()).hexdigest()[:24],
-                gene=text(get('Genes', 'Gene')), transcript=text(get('Transcript', 'Gene Isoform')),
+                gene=gene, transcript=transcript,
                 coding=text(get('Coding', 'Nucleotide Change', 'Nuc Change')),
                 protein=text(get('Amino Acid Change', 'AA Change')), locus=text(get('Locus')),
                 ref=text(get('Ref')), alt=text(get('Alt', 'Observed Allele')),
@@ -207,7 +265,7 @@ def load_file(path: Path) -> ImportResult:
                 coverage=number(get('Coverage')), copy_number=number(get('Copy Number')),
                 variant_id=text(get('Variant ID')), assembly=assembly, platform=platform,
                 source_file=source_path, source_hash=digest, source_row=index,
-                selected=call.upper().startswith('PRESENT') and text(get('Type')).lower() in
+                selected=not issue and call.upper().startswith('PRESENT') and text(get('Type')).lower() in
                 {'snp', 'snv', 'del', 'ins', 'indel', 'mnp', 'complex'}, raw=raw))
     if not variants:
         raise ValueError('No variant table with Type and Gene/Genes found. Check the export format.')

@@ -43,8 +43,18 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    Import details contains assay and genome controls; hg19 is the
    workspace default when the file omits it. Unknown or conflicting inputs need
    confirmation. The file overview lists Sample, Analysis, File and Rows.
-2. **Variants** uses the sample list on the left. Select that file's variants,
-   copy selected cells to Excel with Ctrl+C. **Variant details** opens optional
+2. **Variants** uses the sample list on the left. Files start with no variants
+   checked. Tick **Valgt**, or highlight rows and press **Bruk markerte rader**
+   to replace this file's checked set. **Fjern valg** clears all choices in this
+   file, including rows hidden by a filter. Highlighting cells alone is for
+   copying to Excel with Ctrl+C. Multiple transcript annotations become separate
+   purple choices, each with its own checkbox. When selected searches start, the
+   app confirms the exact transcript's gene with NCBI and checks each candidate
+   against the original genomic event in Mutalyzer. This check also runs when the
+   Mutalyzer screenshot source is unchecked. Unconfirmed choices remain marked
+   for review and cannot be queried or exported as findings. Low-coverage cells retain their red warning.
+   Original rows occur once in Excel raw data, with each annotation linked by provenance.
+   **Variant details** opens optional
    identity review and assessments. The normal view omits
    unselected absent Genexus calls and CNV/RNA quality rows; **Show all rows**
    restores them. The **Quality** workspace view always checks all imported rows.
@@ -52,6 +62,16 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    retries and **Export Excel**. MTBP tissue defaults to Other. Match states and
    source assertions stay distinct from laboratory classifications.
 4. **Settings** contains appearance, browser behaviour and database accounts.
+
+Annotation checks handle unequal or reordered lists, duplicate transcripts and
+missing names without constructing all gene/name combinations. HGVS brackets and
+fusion/CNV events stay intact. Gene/transcript columns can be repaired only when
+their cell contents prove they were reversed; original cells and repair provenance
+remain available. Exact public NM/NR references are fetched lazily and cached only
+in memory during the run. Missing REF/ALT, unresolved versions, multiple ALT
+alleles or unavailable reference services require review/retry. Automatic splitting
+is bounded to 64 transcript choices and 64 names per source row. The current
+database workflows use confirmed GRCh37/hg19 coordinates.
 
 The app icon source is `src/solide/assets/solide.svg`. Edit it and run
 `python scripts/build_icon.py` to regenerate the PNG and Windows ICO.
@@ -82,14 +102,19 @@ prose, screenshots and imported cells retain their source language.
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
 
 **Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
-required. **Use checked name** copies a sequence-verified suggestion and its source
-alleles into the form. Review them, tick **HGVS / mapping reviewed**, then save.
+required. A new name is applied automatically only after an independent check
+against the same explicit GRCh37 sequence event and source/MANE transcript.
+Conflicts, stale responses and ambiguous gene/transcript choices require review.
+**Use checked name** remains available for manual review of other candidates.
+If a new confirmed name makes requested results outdated, the same run refreshes
+those sources for the selected variant. Explicit single-result reruns keep their
+chosen scope; MTBP always retains its selected analysis batch.
 Original imported names remain intact. A green normalizer result alone is not
 proof that an arbitrary transcript is the right reporting reference.
 
 SpliceAI runs automatically for selected intronic candidates within ±100 bp.
-The search page shows the candidate count. Excel explicitly says **Not indicated
-(±100 bp intronic rule)** when a selected variant is outside that rule.
+The search page shows the candidate count. Excel says **Ikke kjørt** when a
+selected variant is outside that rule.
 Its prediction window is ±500 bp with masked scores on hg19; this window differs
 from the rule selecting candidates. The app captures the actual query/settings
 and all basic transcript scores. A failed screenshot retains the API result and
@@ -106,14 +131,18 @@ need to finish first. Provisional captures remain marked as partial evidence.
 **Settings → Text size** offers 14, 16, 18 and 20 px; 16 px is the default.
 Dialogs, dropdowns and progress text keep readable colours with Windows dark themes.
 
-**Settings → Database accounts** supports Franklin, COSMIC, OncoKB and MTBP.
-Enter a username and optional password, then **Save account**. Usernames stay
+**Settings → Innlogging** supports Franklin, COSMIC, OncoKB and MTBP.
+Enter a username and optional password, then **Logg inn / kontroller**. Confirmed
+usernames and verified submitted passwords are saved automatically. Usernames stay
 in local settings; passwords use Windows Credential Manager under a separate
 Solide namespace through [keyring](https://keyring.readthedocs.io/en/latest/).
 Passwords are never stored in session JSON, settings JSON, reports or logs.
-**Forget password** removes the stored credential; it does not clear Edge cookies.
-**Sign in / check** opens visible Edge and records the last confirmed sign-in.
-This timestamp is a past check, not a guarantee that a session is still valid.
+**Glem passord** removes the stored credential; it does not clear Edge cookies.
+Verified logins are green in Settings and source choices; all four confirmed
+logins show **Innlogget på alle**. After restart the saved timestamp is a past
+check, shown as **Sist bekreftet** until checked again. Failed authentication
+removes green status. **Avbryt**, navigating away and closing the login window
+cancel the task and release its Edge profile.
 If the vault is unavailable, visible sign-in and existing Edge sessions still work.
 
 The **Log** button is available on every page. The activity log and search captures are temporary and cleared on normal close.

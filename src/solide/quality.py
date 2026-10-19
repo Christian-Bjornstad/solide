@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import re
 from .models import Variant
+from .annotations import annotation_group,needs_annotation_resolution,annotation_resolution_current
 
 MANE_TARGETS = {'FGFR1': ('NM_001174067.1', 'NM_023110.3'),
                 'MET': ('NM_001127500.3', 'NM_000245.4')}
@@ -15,6 +16,10 @@ class QualityFlag:
 
 def kind_key(value: str) -> str:
     return value.replace(' ', '').lower()
+
+
+def overlapping_genes(v: Variant) -> bool:
+    return bool(annotation_group(v)) or len({gene.strip().casefold() for gene in v.gene.split(',') if gene.strip()})>1
 
 
 def qc_flags(v: Variant) -> list[QualityFlag]:
@@ -58,6 +63,8 @@ def review_reasons(v: Variant) -> list[str]:
     target = MANE_TARGETS.get(v.gene)
     if target and (target[0] in v.transcript or not v.transcript):
         reasons.append('MANE')
-    if ',' in v.transcript or ',' in v.gene:
+    if needs_annotation_resolution(v) and not annotation_resolution_current(v):
+        reasons.append('Kobling må kontrolleres')
+    elif ',' in v.transcript or ',' in v.gene:
         reasons.append('Multiple transcripts / genes')
     return reasons

@@ -18,8 +18,8 @@ def test_clean_attachment_has_blank_notes_no_quality_details_or_internal_links(t
     with load_workbook(path) as book:
         assert book.sheetnames==['Oversikt','EGFR','Kilder','Rådata']
         assert book['Oversikt']['D3'].value is None
-        assert book['Oversikt']['G8'].value=='Benign'
-        assert book['Oversikt']['G8'].hyperlink.target=='https://example.org/record'
+        assert book['Oversikt']['M8'].value=='Benign'
+        assert book['Oversikt']['M8'].hyperlink.target=='https://example.org/record'
         assert book['Oversikt']['A8'].hyperlink is None
         visible='\n'.join(str(c.value) for s in book if s.sheet_state=='visible' for row in s for c in row if c.value)
         assert all(x not in visible for x in ['Review match','Verified match','Laboratory assessment',
@@ -46,9 +46,9 @@ def test_actual_source_labels_and_cosmic_id_replace_match_status(tmp_path):
                                 url='https://cancer.sanger.ac.uk/cosmic/mutation/overview?id=6224')
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
         row=book['Oversikt']
-        assert row['F8'].value=='Putative functionally relevant variants – Evidence A (Curated)'
-        assert row['G8'].value=='Likely Benign'
-        assert row['H8'].value=='Pathogenic'
+        assert row['L8'].value=='Putative functionally relevant variants – Evidence A (Curated)'
+        assert row['M8'].value=='Likely Benign'
+        assert row['K8'].value=='Pathogenic'
         assert row['I8'].value=='Oncogenic'
         assert row['J8'].value=='COSM6224'
         assert row['J8'].hyperlink.target.endswith('id=6224')
@@ -58,8 +58,8 @@ def test_no_evidence_and_stale_assertions_do_not_become_positive_results(tmp_pat
     session,rows=make_session(Variant(gene='EGFR',selected=True))
     rows[0].evidence['Franklin']=result(rows[0],clinical_significance='Benign',fingerprint='old')
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
-        assert book['Oversikt']['G8'].value=='Utdatert'
-        assert book['Oversikt']['G8'].hyperlink is None
+        assert book['Oversikt']['M8'].value=='Utdatert'
+        assert book['Oversikt']['M8'].hyperlink is None
         assert book['Oversikt']['J8'].value is None
 
 

@@ -26,6 +26,8 @@ TEXT={
     'Franklin classification and ACMG evidence':'Franklin-klassifikasjon og ACMG-evidens',
     'Full ACMG classification page':'ACMG-klassifikasjon','ACMG classification overview':'ACMG-oversikt',
     'Oncogenic classification overview':'Onkogen klassifikasjon',
+    'Predictions':'Prediksjoner','Population frequencies':'Populasjonsfrekvenser',
+    'Clinical evidence':'Klinisk evidens',
     'COSMIC overview':'COSMIC-oversikt','COSMIC tissue distribution':'COSMIC-vevsfordeling',
     'COSMIC samples (all tissues)':'COSMIC-prøver (alle vev)',
     'Alteration-centric functional evidence':'Funksjonell evidens',

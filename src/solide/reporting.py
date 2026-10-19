@@ -20,6 +20,8 @@ from .report_layout import (VPM_COLORS,vpm_base_sheet,vpm_border,vpm_title,vpm_s
 from . import __version__
 from .report_language import report_text,capture_caption
 from .localtime import oslo_now, oslo_datetime, EXCEL_DATETIME_FORMAT
+from .nomenclature import display_identity
+from .annotations import source_row_groups,annotation_group,require_resolved_annotations
 
 STATUS={'found':'Found','verified':'Verified','not_found':'Not found','not_applicable':'Not applicable',
     'needs_review':'Review required','error':'Error','timeout':'Timeout','identity_mismatch':'Identity mismatch',
@@ -29,7 +31,7 @@ STATUS={'found':'Found','verified':'Verified','not_found':'Not found','not_appli
     'submission_unknown':'Submission uncertain','rate_limited':'Rate limited','quota_exhausted':'Quota reached',
     'deferred':'Deferred','unauthorized':'Access required','token_required':'Access required',
     'layout_changed':'Layout changed','ambiguous':'Ambiguous match'}
-SOURCE_ORDER=('MTBP','Franklin','ClinVar','OncoKB','COSMIC','BRCA Exchange','Mutalyzer','SpliceAI')
+SOURCE_ORDER=('Mutalyzer','SpliceAI','BRCA Exchange','OncoKB','COSMIC','ClinVar','MTBP','Franklin')
 
 
 def source_classification(evidence):
@@ -176,7 +178,9 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
         raise ValueError('This sample has multiple analyses. Choose one analysis before exporting.')
     variants=[v for v in session.variants if v.patient==patient]
     if not variants:raise ValueError('No rows for this patient.')
+    original_groups=source_row_groups(variants)
     selected=[v for v in variants if v.selected]
+    for variant in selected:require_resolved_annotations(variant)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^\w.-]','_',patient).strip('.')[:70] or 'patient'
     generated=oslo_now();report_id=uuid.uuid4().hex[:8]
@@ -186,8 +190,8 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     add_row(overview,['Patient / sample',patient,'MTBP tissue',session.tissue(patient),'Report ID',report_id,'Export scope',scope_note(variants)])
     add_row(overview,['Generated (Oslo)',generated.replace(tzinfo=None),'App version',__version__,'Report format',3])
     assemblies=', '.join(sorted({v.assembly for v in variants}))
-    add_row(overview,['Assembly',assemblies,'Imported rows',len(variants),'Selected variants',len(selected),'Failed QC rows',
-        sum(any(f.status=='Failed' for f in qc_flags(v)) for v in variants)])
+    add_row(overview,['Assembly',assemblies,'Imported rows',len(original_groups),'Selected variants',len(selected),'Failed QC rows',
+        sum(any(f.status=='Failed' for f in qc_flags(group[0])) for group in original_groups)])
     headers=['Gene','Variant','AF (%)','Coverage','Quality','Classification','Report decision','Evidence']
     add_row(overview,headers)
     for v in selected:
@@ -215,7 +219,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
     overview.print_area=f'A1:H{overview.max_row}'
 
     qc=w.create_sheet('Quality')
-    raw_rows={v.id:index for index,v in enumerate(variants,2)}
+    raw_rows={v.id:index for index,group in enumerate(original_groups,2) for v in group}
     add_row(qc,['Gene','Variant','Category','Status','Value','Reason','Source row','Source file','Row ID'])
     for v in variants:
         for flag in qc_flags(v):
@@ -323,7 +327,7 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
 
     raw=w.create_sheet('Raw data')
     # Preserve A–L and every subsequent exported column in source order.
-    originals=[raw_values(v) for v in variants]
+    originals=[raw_values(group[0]) for group in original_groups]
     keys=list(dict.fromkeys(key for original in originals for key in original))
     technical=['Solide Row ID','Selected','Source row','Source file','Source sheet','Source SHA256','Assembly']
     occupied={key.casefold() for key in keys}
@@ -331,7 +335,9 @@ def export_patient(session:Session,patient:str,directory:Path)->Path:
         while name.casefold() in occupied:name+=' (provenance)'
         technical[index]=name;occupied.add(name.casefold())
     add_row(raw,[*keys,*technical])
-    for v,original in zip(variants,originals):original_row(raw,[*[original.get(k) for k in keys],v.id,v.selected,v.source_row,Path(v.source_file).name,v.raw.get('_sheet',''),v.source_hash,v.assembly])
+    for group,original in zip(original_groups,originals):
+        v=group[0]
+        original_row(raw,[*[original.get(k) for k in keys],'; '.join(child.id for child in group),any(child.selected for child in group),v.source_row,Path(v.source_file).name,v.raw.get('_sheet',''),v.source_hash,v.assembly])
     style_table(raw,name='SolideRawData');raw.freeze_panes='C2'
 
     fd,tmp=tempfile.mkstemp(dir=directory,prefix='.solide-',suffix='.xlsx');os.close(fd)
@@ -551,7 +557,8 @@ def _quality_sections(workbook,analysis,variants):
 
 
 def _raw_analysis_sheet(workbook,variants,analysis,*,norwegian=False):
-    sheet=workbook.create_sheet('Rådata' if norwegian else 'Raw data');originals=[raw_values(variant) for variant in variants]
+    groups=source_row_groups(variants)
+    sheet=workbook.create_sheet('Rådata' if norwegian else 'Raw data');originals=[raw_values(group[0]) for group in groups]
     keys=list(dict.fromkeys(key for values in originals for key in values))
     technical=['Solide Row ID','Selected','Source row','Source file','Source sheet','Assembly','Analysis ID','Source SHA256']
     if norwegian:technical=[report_text(label) for label in technical]
@@ -560,11 +567,12 @@ def _raw_analysis_sheet(workbook,variants,analysis,*,norwegian=False):
         while name.casefold() in occupied:name+=' (kildedata)' if norwegian else ' (provenance)'
         technical[index]=name;occupied.add(name.casefold())
     add_row(sheet,[*keys,*technical])
-    for variant,values in zip(variants,originals):
+    for group,values in zip(groups,originals):
+        variant=group[0]
         for value in values.values():
             if isinstance(value,str) and (len(value)>32767 or re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]',value)):
                 raise ValueError('An original source field cannot be stored losslessly in Excel. Retain the original TSV and review this field before exporting.')
-        original_row(sheet,[*[values.get(key) for key in keys],variant.id,variant.selected,variant.source_row,
+        original_row(sheet,[*[values.get(key) for key in keys],'; '.join(child.id for child in group),any(child.selected for child in group),variant.source_row,
                             Path(variant.source_file).name,variant.raw.get('_sheet',''),variant.assembly,analysis.id,variant.source_hash])
     style_table(sheet,name='SolideAnalysisRawData');sheet.sheet_state='hidden'
 
@@ -630,6 +638,16 @@ def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,anal
         original_row(sheet,[None]*7+[analysis.id,'analysis',tr('Source metadata')])
         storage=sheet.max_row
         _literal_chunks(sheet,storage,11,json.dumps(analysis.metadata,ensure_ascii=False,default=str))
+        sheet.row_dimensions[storage].hidden=True
+    for variant in variants:
+        group=annotation_group(variant)
+        if not group:continue
+        original_row(sheet,[None]*7+[variant.id,'annotation','Annotasjonsvalg'])
+        storage=sheet.max_row
+        mapping={**group,'gene_choice':variant.gene,'transcript_choice':variant.transcript,
+                 'coding_choice':variant.coding,'protein_choice':variant.protein,'selected':variant.selected,
+                 'resolution':variant.raw.get('_annotation_resolution',{})}
+        _literal_chunks(sheet,storage,11,json.dumps(mapping,ensure_ascii=False))
         sheet.row_dimensions[storage].hidden=True
     sheet.print_area=f'A1:G{max(sheet.max_row,metadata_row)}'
 
@@ -783,6 +801,8 @@ def export_analysis_compact(session:Session,analysis_id:str,directory:Path,inclu
     scoped=analysis_scoped_session(session,analysis_id);analysis=scoped.analysis(analysis_id)
     if analysis.profile=='Unassigned':raise ValueError('Choose OPA or Ion Torrent for this analysis before exporting.')
     variants=scoped.analysis_variants(analysis_id)
+    for variant in variants:
+        if variant.selected:require_resolved_annotations(variant)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     stem=re.sub(r'[^\w.-]','_',analysis.patient).strip('.')[:60] or 'source'
     profile=re.sub(r'[^\w.-]','_',analysis.profile)
@@ -813,7 +833,7 @@ def _vpm_compact(variant,source,scoped):
     if source=='Mutalyzer' and evidence_is_current(variant,item,scoped.tissue_for(variant),scoped):
         checked=raw.get('nomenclature_assessment') or {}
         if checked.get('identity_confirmed') is True and checked.get('status') in {'Unchanged','Normalized'}:
-            return 'Uendret' if checked.get('status')=='Unchanged' else 'Normalisert'
+            return 'Normalisert' if _vpm_normalized_name(variant,item) else 'Uendret'
         return 'Kontroller variant'
     if assessment not in {'Verified match','Review match'}:
         return 'Bilde mangler' if assessment=='Missing capture' else 'Kontroller resultat'
@@ -849,6 +869,33 @@ def _vpm_source_url(variant,source,scoped):
     return _public_source_url(source,item.get('url',''))
 
 
+def _vpm_identity(variant):
+    return display_identity(variant)
+
+
+def _vpm_normalized_name(variant,item):
+    raw=item.get('raw',{});checked=raw.get('nomenclature_assessment',{})
+    if checked.get('identity_confirmed') is not True:return False
+    if checked.get('status')=='Normalized':return True
+    original=variant.coding if ':' in variant.coding else f'{variant.transcript}:{variant.coding}'
+    return (checked.get('status')=='Unchanged' and variant.nomenclature_verified
+            and bool(variant.corrected_hgvs) and variant.corrected_hgvs!=original
+            and checked.get('suggested_hgvs')==raw.get('original')==variant.corrected_hgvs)
+
+
+def _vpm_source_visible(variant,source,scoped):
+    item=variant.evidence.get(source,{})
+    if not item or item.get('status')=='not_applicable':return False
+    if source=='Mutalyzer':
+        return (evidence_is_current(variant,item,scoped.tissue_for(variant),scoped)
+                and _vpm_normalized_name(variant,item)
+                and _capture_export_allowed(variant,item,scoped))
+    if source=='SpliceAI':return assess_evidence(variant,item,scoped).label=='Verified match'
+    if source=='BRCA Exchange':
+        return variant.gene in {'BRCA1','BRCA2'} and assess_evidence(variant,item,scoped).label=='Verified match'
+    return True
+
+
 def _vpm_variant_name(variant,index,counts,used):
     gene=variant.gene or f'Variant {index}'
     detail=''
@@ -880,7 +927,8 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     widths=[14,31,25,52,32,*([22]*len(SOURCE_ORDER))]
     for row,variant in enumerate(selected,8):
         labels=[_vpm_compact(variant,source,scoped) for source in SOURCE_ORDER]
-        values=[variant.gene,variant.coding,variant.protein,
+        coding,protein,_=_vpm_identity(variant)
+        values=[variant.gene,coding,protein,
                 '\n'.join(f'{source}: {label}' for source,label in zip(SOURCE_ORDER,labels) if label),
                 '',*labels]
         for column,value in enumerate(values,1):
@@ -909,9 +957,10 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
 
 def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_reports):
     sheet=workbook.create_sheet(name);vpm_base_sheet(sheet)
-    vpm_title(sheet,' | '.join(filter(None,[variant.gene,variant.coding,variant.protein])))
+    coding,protein,transcript=_vpm_identity(variant)
+    vpm_title(sheet,' | '.join(filter(None,[variant.gene,coding,protein])))
     sheet.merge_cells('A3:L3')
-    metadata=[variant.protein,'Transkript: '+variant.transcript if variant.transcript else '',
+    metadata=[protein,'Transkript: '+transcript if transcript else '',
               ' | '.join(filter(None,[variant.assembly,variant.locus,variant.ref,variant.alt])),
               f'AF {variant.af_percent:.2f}%' if variant.af_percent is not None else '',
               f'Dekning {variant.coverage:g}' if variant.coverage is not None else '',variant.kind]
@@ -922,7 +971,7 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
     row=5;anchors={}
     for source in SOURCE_ORDER:
         item=variant.evidence.get(source,{})
-        if not item or item.get('status')=='not_applicable':continue
+        if not _vpm_source_visible(variant,source,scoped):continue
         row=vpm_section(sheet,row,source,source=source)
         label=_vpm_compact(variant,source,scoped)
         if label:sheet.cell(row-1,1,source+' – '+label)
@@ -986,6 +1035,7 @@ def export_analysis(session:Session,analysis_id:str,directory:Path,include_evide
     scoped=analysis_scoped_session(session,analysis_id);analysis=scoped.analysis(analysis_id)
     if analysis.profile=='Unassigned':raise ValueError('Choose OPA or Ion Torrent for this analysis before exporting.')
     variants=scoped.analysis_variants(analysis_id);selected=[variant for variant in variants if variant.selected]
+    for variant in selected:require_resolved_annotations(variant)
     directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     generated=oslo_now().replace(tzinfo=None)
     stem=re.sub(r'[^\w.-]','_',analysis.patient).strip('.')[:60] or 'source'

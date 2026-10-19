@@ -212,7 +212,7 @@ def test_normalization_details_stay_in_hidden_storage_and_app_classification_is_
              'genomic_hgvs':'NC_000010.10:g.1_2del','source_genomic_query':'10-1-AC-A'}}
     rows[0].evidence['Mutalyzer']=result(rows[0],source='Mutalyzer',status='needs_review',raw=raw)
     with load_workbook(export_analysis(session,'analysis-a',tmp_path).report) as book:
-        assert 'Mutalyzer – Kontroller variant' in text(book)
+        assert not any('Mutalyzer –' in str(cell.value) for row in book['PTEN'] for cell in row)
         assert not book['PTEN']._images
         stored=next(row for row in book['Kilder'] if row[7].value==rows[0].id and row[9].value=='JSON-svar')
         assert json.loads(''.join(str(cell.value or '') for cell in stored[10:]))==raw

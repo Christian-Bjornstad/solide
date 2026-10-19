@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased — 19 October 2026
+
+- Recover from cancelled/failed login without leaving Edge profiles or active
+  threads behind. Save verified login details automatically; show confirmed
+  per-provider and all-provider states, and invalidate expired authentication.
+- Start imported files with no variants checked. Apply highlighted rows as an
+  explicit choice, show the checked count and clear hidden choices as well.
+- Split multiple transcript annotations into independent purple choices. Resolve
+  selected choices through exact-version NCBI gene identity and Mutalyzer genomic
+  event proof before every provider, including when Mutalyzer is unchecked.
+  Handle reordered/unequal lists, duplicate references and compound HGVS; retain
+  one original raw Excel row and stop unconfirmed findings or incomplete MTBP batches.
+- Repair unequivocally reversed gene/transcript cells with retained provenance;
+  validate repeated headers and preserve their original column/cell order.
+- Use independently confirmed new nomenclature automatically while preserving
+  original cells. Reorder Excel sources to Mutalyzer, SpliceAI, BRCA Exchange,
+  OncoKB, COSMIC, ClinVar, MTBP and Franklin; omit inapplicable optional panels.
+- Capture expanded Franklin Clinical evidence alongside predictions and
+  population frequencies, with identity and complete-layout checks.
+- Preserve COSV, lowercase and multiple COSMIC identifiers. Distinguish network,
+  certificate, proxy, timeout and rate-limit failures from invalid variant input.
+
 ## Unreleased — 18 October 2026
 
 - Stress-test synthetic OPA/Ion files, malformed data, random GUI actions,

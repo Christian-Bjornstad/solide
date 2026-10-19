@@ -30,7 +30,7 @@ _SPLICE_POSITIONS = ('DP_AG', 'DP_AL', 'DP_DG', 'DP_DL')
 def hgvs_query(v: Variant) -> str:
     if v.corrected_hgvs:
         return v.corrected_hgvs.strip()
-    if ':' in v.coding and re.match(r'(NM_|NC_|NG_)', v.coding):
+    if ':' in v.coding and re.match(r'(NM_|NR_|NC_|NG_)', v.coding):
         return v.coding
     if re.fullmatch(r'(?:NM_|NR_|NC_|NG_)[\w.]+',v.transcript) and v.coding:
         return f'{v.transcript}:{v.coding}'
@@ -68,6 +68,8 @@ def _genomic_normalization_query(v: Variant) -> str:
 
 
 def _normalization_query(v: Variant) -> tuple[str, str]:
+    from .annotations import require_resolved_annotations
+    require_resolved_annotations(v)
     try:
         description = hgvs_query(v)
     except ValueError:
@@ -107,6 +109,7 @@ def _map_normalization(http, result: dict, target: str) -> None:
         if codes:
             reason += '; ' + ', '.join(codes)
         result['mapping_issue'] = f'MANE mapping unavailable ({reason}). Review the target transcript manually.'
+        result['mapping_retryable']=isinstance(exc,requests.RequestException)
 
 
 def _normalize_description(http, description: str, basis: str) -> dict:
@@ -176,6 +179,7 @@ def _intronic_genomic_candidate(v: Variant, http, result: dict) -> None:
         result['genomic_normalization_issue'] = (
             f'GRCh37 genomic candidate unavailable ({type(exc).__name__}). '
             'Review the original transcript and genomic alleles.')
+        result['genomic_normalization_retryable']=isinstance(exc,requests.RequestException)
 
 
 def _intronic_context_normalization(v: Variant, http, result: dict) -> None:
@@ -215,6 +219,7 @@ def _intronic_context_normalization(v: Variant, http, result: dict) -> None:
         result['contextual_normalization_issue'] = (
             f'Intronic genomic-context normalization unavailable ({type(exc).__name__}). '
             'Review the original transcript and genomic alleles.')
+        result['contextual_normalization_retryable']=isinstance(exc,requests.RequestException)
 
 
 class _IdentityConflict(ValueError):
@@ -306,10 +311,12 @@ def _genomic_projection(http,data: dict,reference: str,checks: dict) -> str:
     return genomic
 
 
-def _assess_normalization(v: Variant,http,result: dict) -> None:
+def _assess_normalization(v: Variant,http,result: dict,*,reference_identity=None) -> None:
     assessment=dict(status='Review required',reason='Independent genomic identity has not been confirmed.',
         suggested_hgvs='',genomic_hgvs='',source_genomic_query='',identity_confirmed=False,candidates=[])
     result['nomenclature_assessment']=assessment
+    assessment['retryable']=any(result.get(key) is True for key in (
+        'mapping_retryable','genomic_normalization_retryable','contextual_normalization_retryable'))
     primary=result['normalization'];original=result['original'];errors=primary.get('errors') or []
     validated_input=original;contextual=False
     if errors:
@@ -349,6 +356,12 @@ def _assess_normalization(v: Variant,http,result: dict) -> None:
     if isinstance(returned_gene,str) and returned_gene and returned_gene!=v.gene:
         assessment.update(status='Conflict',reason='The normalized transcript belongs to a different gene than the source.')
         return
+    if (not returned_gene and isinstance(reference_identity,dict)
+            and reference_identity.get('status')=='resolved' and reference_identity.get('source')=='NCBI RefSeq'
+            and reference_identity.get('transcript')==returned_transcript==requested_transcript==v.transcript
+            and reference_identity.get('gene')==v.gene):
+        returned_gene=reference_identity['gene']
+        result['reference_identity']=dict(reference_identity)
     checks={};result['genomic_identity_check']=checks
     try:
         query,source_description=_source_allele_description(v)
@@ -418,13 +431,25 @@ def _assess_normalization(v: Variant,http,result: dict) -> None:
         assessment.update(status='Conflict',reason=str(exc))
     except (requests.RequestException,ValueError,KeyError,TypeError,AttributeError) as exc:
         assessment['reason']=f'Independent identity validation requires review ({type(exc).__name__}).'
+        if isinstance(exc,requests.RequestException):assessment['retryable']=True
 
 
-def normalize_variant(v: Variant, http=None) -> dict:
+class _CheckpointHttp:
+    def __init__(self,http,checkpoint):self.http=http;self.checkpoint=checkpoint
+    def get(self,*args,**kwargs):
+        self.checkpoint()
+        result=self.http.get(*args,**kwargs)
+        self.checkpoint()
+        return result
+    def close(self):self.http.close()
+
+
+def normalize_variant(v: Variant, http=None, *, checkpoint=None,reference_identity=None) -> dict:
     description, basis = _normalization_query(v)
     owned_session = http is None
     if owned_session:
         http = system_trust_session()
+    if checkpoint is not None:http=_CheckpointHttp(http,checkpoint)
     try:
         result = _normalize_description(http, description, basis)
         data = result['normalization']
@@ -433,11 +458,91 @@ def normalize_variant(v: Variant, http=None) -> dict:
         target = MANE_TARGETS.get(v.gene)
         if target and target[0] in v.transcript and not data.get('errors'):
             _map_normalization(http, result, target[1])
-        _assess_normalization(v,http,result)
+        _assess_normalization(v,http,result,reference_identity=reference_identity)
         return result
     finally:
         if owned_session:
             http.close()
+
+
+def apply_confirmed_normalization(v: Variant, result: dict) -> bool:
+    """Use an independently checked new name; retain every imported field.
+
+    Only the candidate validated against the explicit source sequence event may
+    be applied. The API's equivalent-description list alone is insufficient.
+    """
+    assessment=result.get('nomenclature_assessment',{})
+    if (not isinstance(assessment,dict) or assessment.get('status')!='Normalized'
+            or assessment.get('identity_confirmed') is not True
+            or not v.gene or ',' in v.gene or ',' in v.transcript):
+        return False
+    suggested=assessment.get('suggested_hgvs')
+    if not isinstance(suggested,str) or not _FULL_HGVS.fullmatch(suggested):
+        return False
+    try:
+        original,_=_normalization_query(v)
+        genomic=genomic_query(v)
+    except ValueError:
+        return False
+    if (result.get('original')!=original or suggested==original
+            or assessment.get('source_genomic_query')!=genomic):
+        return False
+    checks=result.get('genomic_identity_check')
+    if not isinstance(checks,dict):return False
+    event=checks.get('matched_event',{})
+    chrom=genomic.removeprefix('chr').split('-',1)[0]
+    if (not isinstance(event,dict) or event.get('reference')!=_GRCH37_REFERENCES.get(chrom)
+            or not isinstance(event.get('start'),int) or not isinstance(event.get('end'),int)
+            or not 0<=event['start']<=event['end'] or not isinstance(event.get('inserted'),str)):
+        return False
+    candidates=assessment.get('candidates',[])
+    if not isinstance(candidates,list):return False
+    candidate=next((item for item in candidates if isinstance(item,dict) and item.get('description')==suggested),None)
+    if not candidate:return False
+    requested_transcript=_transcript(original);target_transcript=_transcript(suggested)
+    if target_transcript and target_transcript!=requested_transcript:
+        target=MANE_TARGETS.get(v.gene)
+        if (not target or target!=(requested_transcript,target_transcript)
+                or candidate.get('label')!='MANE transcript'):
+            return False
+    from .annotations import refresh_annotation_proof
+    v.corrected_hgvs=suggested;v.controlled_genomic=genomic;v.nomenclature_verified=True
+    refresh_annotation_proof(v)
+    result['nomenclature_application']={'applied':True,'from_hgvs':original,
+        'to_hgvs':suggested,'source_genomic_query':genomic}
+    return True
+
+
+def retain_confirmed_normalization(v: Variant, result: dict, tissue: str) -> bool:
+    """Retain an applied name only after a fresh, independently checked recheck."""
+    previous=v.evidence.get('Mutalyzer',{})
+    if (previous.get('status')!='verified' or previous.get('fingerprint')!=v.fingerprint(tissue)
+            or not v.nomenclature_verified or not v.corrected_hgvs):return False
+    old_raw=previous.get('raw',{});application=old_raw.get('nomenclature_application',{})
+    checked=result.get('nomenclature_assessment',{});normalization=result.get('normalization',{})
+    if not all(isinstance(value,dict) for value in (application,checked,normalization)):return False
+    if (application.get('applied') is not True or application.get('to_hgvs')!=v.corrected_hgvs
+            or checked.get('status')!='Unchanged' or checked.get('identity_confirmed') is not True
+            or result.get('original')!=v.corrected_hgvs
+            or checked.get('suggested_hgvs')!=v.corrected_hgvs
+            or normalization.get('normalized_description')!=v.corrected_hgvs
+            or normalization.get('errors')):return False
+    try:genomic=genomic_query(v)
+    except ValueError:return False
+    if checked.get('source_genomic_query')!=genomic or application.get('source_genomic_query')!=genomic:return False
+    old_checks=old_raw.get('genomic_identity_check');new_checks=result.get('genomic_identity_check')
+    if not isinstance(old_checks,dict) or not isinstance(new_checks,dict):return False
+    event=old_checks.get('matched_event')
+    if not isinstance(event,dict) or not event or new_checks.get('matched_event')!=event:return False
+    result['nomenclature_application']=dict(application)
+    return True
+
+
+def display_identity(v: Variant) -> tuple[str,str,str]:
+    """Present a checked nucleotide identity without inferring a protein name."""
+    if v.nomenclature_verified and v.corrected_hgvs:
+        return v.corrected_hgvs,'',_transcript(v.corrected_hgvs)
+    return v.coding,v.protein,v.transcript
 
 
 def _trim_spliceai_alleles(pos: int, ref: str, alt: str) -> tuple[int, str, str]:

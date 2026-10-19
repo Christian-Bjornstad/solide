@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import asdict, dataclass
+from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -13,12 +14,16 @@ from functools import lru_cache
 from PIL.Image import DecompressionBombError
 from .models import Variant, Session
 from .analyses import analysis_scoped_session, validate_analyses
+from .annotations import needs_annotation_resolution, annotation_resolution_current,annotation_fingerprint
+from .annotation_identity import TranscriptIdentityResolver
+from .annotation_resolution import resolve_annotation
 from .quality import review_reasons, MANE_TARGETS
-from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, spliceai_variant, spliceai_summary, validate_spliceai_response
+from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, apply_confirmed_normalization, retain_confirmed_normalization, spliceai_variant, spliceai_summary, validate_spliceai_response
 from .brca_exchange import brca_exchange_variant
 from .public_capture import capture_spliceai,capture_mutalyzer,capture_brca_exchange,spliceai_url
+from .source_failures import source_failure
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
-from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled
+from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled,_cosmic_identifiers
 from ._vendor.archer.services.evidence_audit import audit_digest,mtbp_legacy_matching_issue
 from ._vendor.archer.services.capture_validation import validate_capture
 
@@ -31,7 +36,8 @@ FAILED = {'error','timeout','identity_mismatch','partial_capture','login_require
 
 
 def source_applies(variant, source):
-    return source != 'BRCA Exchange' or variant.gene in {'BRCA1','BRCA2'}
+    return (source != 'BRCA Exchange' or variant.gene in {'BRCA1','BRCA2'}
+            or needs_annotation_resolution(variant) and not annotation_resolution_current(variant))
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,9 @@ def assess_evidence(v, evidence, session):
     if not evidence_is_current(v,evidence,session.tissue_for(v),session):
         return EvidenceAssessment('Outdated','Variant, tissue or MTBP selection changed.',True)
     status=evidence.get('status','unknown');raw=evidence.get('raw',{})
+    resolution=v.raw.get('_annotation_resolution',{})
+    if status=='needs_review' and resolution.get('status')=='unresolved' and resolution.get('retryable') is True:
+        return EvidenceAssessment('Recheck required',resolution.get('reason','Prøv koblingskontrollen igjen.'),True)
     if evidence.get('database')=='MTBP':
         issue=mtbp_legacy_matching_issue(DatabaseEvidence('MTBP',status,raw=raw))
         if issue:return EvidenceAssessment('Recheck required',issue,True)
@@ -82,6 +91,15 @@ def assess_evidence(v, evidence, session):
             'ambiguous':'Ambiguous match','submission_unknown':'Submission uncertain','deferred':'Deferred'}.get(status,'Failed'),evidence.get('summary','Search did not complete.'),True)
     if status=='not_found':return EvidenceAssessment('No match','Search completed without a matching record.')
     if status=='not_applicable':return EvidenceAssessment('Not applicable',evidence.get('summary',''))
+    if evidence.get('database')=='Mutalyzer' and status=='verified':
+        applied=raw.get('nomenclature_application',{})
+        checked=raw.get('nomenclature_assessment',{})
+        if (applied.get('applied') is True and checked.get('identity_confirmed') is True
+                and checked.get('status') in {'Normalized','Unchanged'} and v.nomenclature_verified
+                and applied.get('to_hgvs')==v.corrected_hgvs):
+            if not capture_available(evidence):
+                return EvidenceAssessment('Missing capture','Checked normalized name retained; retry the Mutalyzer screenshot.',True)
+            return EvidenceAssessment('Verified match','The normalized name matches the explicit source sequence event.')
     if status=='found':
         source=evidence.get('database','')
         if source=='BRCA Exchange':
@@ -149,6 +167,8 @@ def _analysis_group(v: Variant) -> tuple[str, str]:
 
 
 def query_record(v: Variant, source: str = '') -> VariantRecord:
+    from .annotations import require_resolved_annotations
+    require_resolved_annotations(v)
     if v.assembly != 'GRCh37':
         raise ValueError('Confirm GRCh37 / hg19 before searching.')
     if v.corrected_hgvs and not v.nomenclature_verified:
@@ -169,7 +189,7 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
         target = MANE_TARGETS[v.gene][1]
         if not (v.nomenclature_verified and target in v.corrected_hgvs):
             raise ValueError(f'Review mapped HGVS on {target} before database searches.')
-    hgvsc = ''
+    hgvsc = '';cosmic_ids=','.join(_cosmic_identifiers(v.variant_id))
     try:
         hgvsc = hgvs_query(v)
     except ValueError:
@@ -177,7 +197,7 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
             hgvsc=v.coding
         protein_only=(source in {'MTBP','OncoKB','Franklin'} and
                       bool(re.fullmatch(r'p\.[A-Za-z0-9_*?()=]+',v.protein)))
-        cosmic_id_only=source=='COSMIC' and v.variant_id.startswith('COSM')
+        cosmic_id_only=source=='COSMIC' and bool(cosmic_ids)
         if not hgvsc and not (v.locus and v.ref and v.alt) and not protein_only and not cosmic_id_only:
             raise
     locus,ref,alt=v.locus,v.ref,v.alt
@@ -192,7 +212,7 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
         symbol=v.gene, hgvsc=hgvsc, hgvsp='' if v.corrected_hgvs else v.protein,
         transcript=hgvsc.split(':')[0] if hgvsc.startswith('NM_') else v.transcript,
         genomic_location=locus, ref_allele=ref, alt_allele=alt,
-        variant_type=v.kind, cosmic_id=v.variant_id if v.variant_id.startswith('COSM') else '')
+        variant_type=v.kind, cosmic_id=cosmic_ids)
 
 
 def batch_fingerprint(session: Session, patient: str, analysis_id: str | None = None) -> str:
@@ -215,9 +235,21 @@ def batch_fingerprint(session: Session, patient: str, analysis_id: str | None = 
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _annotation_evidence_stamp(v):
+    proof=v.raw.get('_annotation_resolution',{})
+    return {'status':proof.get('status'),'fingerprint':proof.get('fingerprint'),
+            'source_fingerprint':annotation_fingerprint(v)} if isinstance(proof,dict) and proof else None
+
+
 def evidence_is_current(v: Variant, evidence: dict, tissue: str, session: Session | None = None) -> bool:
     if evidence.get('fingerprint') != v.fingerprint(tissue):
         return False
+    if needs_annotation_resolution(v):
+        resolution=_annotation_evidence_stamp(v)
+        if not resolution or evidence.get('annotation_resolution')!=resolution:
+            return False
+        if not annotation_resolution_current(v) and evidence.get('status')!='needs_review':
+            return False
     if evidence.get('database')=='MTBP' and session is not None:
         if v.analysis_id and evidence.get('analysis_id')!=v.analysis_id:
             return False
@@ -246,8 +278,43 @@ class QueueControl:
             self.stopped.wait(min(0.2, until - time.monotonic()))
 
 
+def _resolve_queue_annotations(selected,plan,control,progress,identity_resolved,refresh_plan):
+    """Resolve only requested selected interpretations before any provider runs."""
+    attempted=set();blocked=set()
+    def next_candidate():
+        return next((variant for variant in selected if variant.id not in attempted
+            and needs_annotation_resolution(variant) and not annotation_resolution_current(variant)
+            and any(row_id==variant.id for row_id,_ in plan)),None)
+    if next_candidate() is None:return blocked
+    with TranscriptIdentityResolver(checkpoint=control.checkpoint) as resolver:
+        while (variant:=next_candidate()) is not None:
+            control.checkpoint()
+            attempted.add(variant.id)
+            before=deepcopy(variant)
+            progress(f'Kontrollerer annotasjon: {variant.transcript or variant.gene}')
+            try:
+                accepted=resolve_annotation(variant,resolver,checkpoint=control.checkpoint)
+                control.checkpoint()
+            except BrowserReviewCancelled:
+                variant.__dict__.clear();variant.__dict__.update(deepcopy(before.__dict__))
+                raise
+            except Exception as exc:
+                variant.__dict__.clear();variant.__dict__.update(deepcopy(before.__dict__))
+                variant.raw['_annotation_resolution']={'status':'unresolved',
+                    'reason':f'Kontroll av annotasjonen mislyktes ({type(exc).__name__}).'}
+                accepted=False
+            if not accepted or not annotation_resolution_current(variant):
+                blocked.add(variant.id)
+            if identity_resolved:
+                identity_resolved(variant.id,{'variant':deepcopy(variant),
+                    'input_fingerprint':before.fingerprint(''),'analysis_id':before.analysis_id})
+            if variant.id not in blocked:refresh_plan(variant)
+    return blocked
+
+
 def run_queue(session: Session, sources: list[str], root: Path, control: QueueControl,
-              emit, progress, background=True, *, plan=None, credentials=None) -> None:
+              emit, progress, background=True, *, plan=None, credentials=None,
+              plan_changed=None, expand_after_normalization=True, identity_resolved=None) -> None:
     selected = [v for v in session.variants if v.selected]
     if not selected:
         raise ValueError('Select at least one variant in Variants.')
@@ -272,12 +339,38 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
         evidence.update(fingerprint=v.fingerprint(tissue),
                         captured_at=datetime.now(timezone.utc).isoformat(),
                         tissue=tissue, database=source,analysis_id=v.analysis_id)
+        if needs_annotation_resolution(v):
+            evidence['annotation_resolution']=_annotation_evidence_stamp(v)
         if source=='MTBP':
             evidence['mtbp_batch']=batch_fingerprint(session,v.patient,v.analysis_id)
         v.evidence[source] = evidence
         emit(v.id, source, evidence)
     def pending(v, source):
         return (v.id,source) in plan
+    def refresh_normalized_plan(v):
+        if not expand_after_normalization:return
+        # A checked new name invalidates that row's completed searches and the
+        # shared MTBP batch. Respect the requested sources and selected rows;
+        # unrelated patients and analyses must keep their original plan.
+        group_ids={row.id for row in selected if _analysis_group(row)==_analysis_group(v)}
+        additions={(row_id,source) for row_id,source in build_search_plan(session,sources,'pending')
+                   if row_id==v.id or source=='MTBP' and row_id in group_ids}
+        if additions-plan:
+            plan.update(additions)
+            if plan_changed:plan_changed(set(plan))
+    blocked=_resolve_queue_annotations(selected,plan,control,progress,identity_resolved,refresh_normalized_plan)
+    for variant in selected:
+        if variant.id not in blocked:continue
+        reason=variant.raw.get('_annotation_resolution',{}).get('reason') or 'Annotasjonen kunne ikke avklares.'
+        for source in sources:
+            if pending(variant,source):
+                store(variant,source,{'status':'needs_review','summary':reason})
+    blocked_mtbp_groups={_analysis_group(variant) for variant in selected if variant.id in blocked
+                         and any(pending(row,'MTBP') for row in selected if _analysis_group(row)==_analysis_group(variant))}
+    for variant in selected:
+        if _analysis_group(variant) in blocked_mtbp_groups and pending(variant,'MTBP') and variant.id not in blocked:
+            store(variant,'MTBP',{'status':'needs_review',
+                'summary':'MTBP-gruppen er stoppet fordi en valgt annotasjon må avklares.'})
     last_splice = 0.0
     for group in sorted(grouped):
         variants=grouped[group]
@@ -287,21 +380,28 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
         patient=variants[0].patient
         analysis_root=root/'analyses'/hashlib.sha256(group[1].encode()).hexdigest()[:16] if group[0]=='analysis' else root
         patient_directory=analysis_root/hashlib.sha256(patient.encode()).hexdigest()[:16]/uuid.uuid4().hex[:12]
-        # Nomenclature comes first. Normalization candidates require human acceptance.
+        # Nomenclature comes first. Only independently proven same-event names
+        # are applied; conflicts and incomplete validation remain reviewable.
         for source in ('Mutalyzer', 'SpliceAI', 'BRCA Exchange'):
             if source not in sources:
                 continue
             for v in variants:
                 control.checkpoint()
-                if not pending(v, source):
+                if v.id in blocked or not pending(v, source):
                     continue
                 progress(f'{source}: {v.gene} {v.coding}')
+                if not source_applies(v,source):
+                    store(v,source,{'status':'not_applicable','summary':'Ikke et BRCA1-/BRCA2-funn.'})
+                    continue
                 if source == 'SpliceAI' and 'SpliceAI' not in review_reasons(v):
                     store(v,source,{'status':'not_applicable','summary':'Outside the ±100 bp intronic rule.'})
                     continue
                 try:
                     if source == 'Mutalyzer':
-                        data=normalize_variant(v)
+                        if needs_annotation_resolution(v) and annotation_resolution_current(v):
+                            data=normalize_variant(v,checkpoint=control.checkpoint,
+                                reference_identity=v.raw['_annotation_resolution'].get('reference'))
+                        else:data=normalize_variant(v)
                         norm=data['normalization']
                         errors=norm.get('errors') or []
                         status='needs_review'
@@ -329,8 +429,13 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                                 if captured:data.update(screenshots=captured['screenshots'],capture=captured)
                             except BrowserReviewCancelled:raise
                             except Exception as exc:data['capture_issue']=str(exc)
+                        applied=apply_confirmed_normalization(v,data)
+                        if applied or retain_confirmed_normalization(v,data,session.tissue_for(v)):
+                            status='verified'
+                            progress('Mutalyzer: verified normalized name applied')
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'+quote(data.get('original',''),safe='')})
+                        if applied:refresh_normalized_plan(v)
                     elif source == 'BRCA Exchange':
                         query_record(v,source)
                         item=brca_exchange_variant(v)
@@ -365,9 +470,9 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                                       'raw':data,'url':spliceai_url(data)})
                 except BrowserReviewCancelled:raise
                 except ValueError as exc:
-                    store(v,source,{'status':'needs_review','summary':str(exc)})
+                    store(v,source,source_failure(source,exc))
                 except Exception as exc:
-                    store(v,source,{'status':'error','summary':str(exc)})
+                    store(v,source,source_failure(source,exc))
         service=BrowserReviewService(profile_root=Path.home()/'.solide'/'browser_profiles',
             mtbp_cancer_type=scoped.tissue_for(variants[0]), stop_requested=control.stopped.is_set,
             pause_wait=control.checkpoint, browser_background=background, **(credentials or {}))
@@ -376,16 +481,33 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
             control.checkpoint()
             if source not in sources:
                 continue
+            if source=='MTBP':
+                if group in blocked_mtbp_groups:continue
+                unresolved=any(needs_annotation_resolution(row) and not annotation_resolution_current(row) for row in variants)
+                if unresolved:
+                    for row in variants:
+                        if pending(row,source):
+                            store(row,source,{'status':'needs_review',
+                                'summary':'MTBP-gruppen er stoppet fordi en valgt annotasjon må avklares.'})
+                    continue
             force_batch=source=='MTBP' and any(pending(v,source) for v in variants)
-            mapping={}
+            mapping={};invalid_queries=set()
             for v in variants:
+                if v.id in blocked:continue
                 if not force_batch and not pending(v,source):
                     continue
                 try:
                     record=query_record(v,source)
                     mapping.setdefault(service.variant_key(record),[]).append((v,record))
                 except ValueError as exc:
+                    invalid_queries.add(v.id)
                     store(v,source,{'status':'needs_review','summary':str(exc)})
+            if source=='MTBP' and invalid_queries:
+                for v in variants:
+                    if v.id not in invalid_queries and (force_batch or pending(v,source)):
+                        store(v,source,{'status':'needs_review',
+                            'summary':'MTBP-gruppen er stoppet fordi en valgt variant ikke kan søkes entydig.'})
+                continue
             records=[]
             active={}
             for key, pairs in mapping.items():
@@ -434,13 +556,13 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                                 data.setdefault('raw',{})['query_basis']='gene_protein_or_identifier'
                                 data['summary']+='\nGene / protein or variant ID search; genomic identity unconfirmed.'
                             store(v,result.database,data)
-            def finish_unreturned(v,message):
+            def finish_unreturned(v,message,error=None):
                 previous=v.evidence.get(source,{})
                 if previous.get('raw',{}).get('provisional_status')=='submission_unknown':
                     data={field:previous[field] for field in ('status','summary','url','raw') if field in previous}
                     data['raw']=dict(data.get('raw',{}));data['raw'].pop('provisional_status',None)
                     data['status']='submission_unknown';data['summary']=message+'\nRetained report ID must be reconciled before resubmission.'
-                else:data={'status':'error','summary':message}
+                else:data=source_failure(source,error) if error else {'status':'error','summary':message}
                 store(v,source,data)
             try:
                 service.search_variants(records,[source],patient_directory,
@@ -455,7 +577,7 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                 for vv in active.values():
                     for v in vv:
                         if v.id not in returned:
-                            finish_unreturned(v,str(exc))
+                            finish_unreturned(v,str(exc),exc)
             finally:
                 if original_audit is not None:
                     service._write_audit=original_audit

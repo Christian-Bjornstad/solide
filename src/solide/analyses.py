@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 
 from .models import Analysis, ImportResult, Session
+from .annotations import split_annotations
 from .sample_identity import normalize_oum,valid_oum
 
 PROFILES = ('OPA', 'Ion Torrent', 'Unassigned')
@@ -105,7 +106,7 @@ def add_analysis(session: Session, result: ImportResult, patient: str, assembly:
         variant.patient = patient
         variant.assembly = assembly
     session.analyses.append(analysis)
-    session.variants.extend(variants)
+    session.variants.extend(child for variant in variants for child in split_annotations(variant))
     validate_analyses(session)
     return analysis
 

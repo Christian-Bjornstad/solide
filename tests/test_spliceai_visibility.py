@@ -12,7 +12,7 @@ def test_excel_explains_spliceai_not_indicated_instead_of_empty_cell(tmp_path):
         'fingerprint':v.fingerprint('Other'),'summary':'Outside the ±100 bp intronic rule.'}
     book=load_workbook(export_analysis(Session(analyses=[a],variants=[v]),'a',tmp_path).report)
     try:
-        assert book['Oversikt']['M8'].value=='Ikke kjørt'
+        assert book['Oversikt']['G8'].value=='Ikke kjørt'
     finally:book.close()
 
 

@@ -159,6 +159,8 @@ class BrowserReviewService:
         self.capture_validator = capture_validator
         self._cosmic_cache: dict[tuple[str, ...], DatabaseEvidence] = {}
         self.login_confirmed = False
+        self.login_credentials_verified = False
+        self.authenticated_sources: set[str] = set()
         self._mtbp_rejected_transcript_queries: set[str] = set()
         self._variant_result_callback: Callable[[VariantRecord, DatabaseEvidence], None] | None = None
 
@@ -206,6 +208,8 @@ class BrowserReviewService:
     def open_login(self, database: str, *, maximum_minutes: int = 30) -> str:
         """Open login and release the profile as soon as authentication succeeds."""
         self.login_confirmed = False
+        self.login_credentials_verified = False
+        self._check_cancelled()
         sync_browser, browser_error, _ = self._browser_api()
         with sync_browser() as runtime:
             context = self._launch_browser_context(
@@ -213,25 +217,34 @@ class BrowserReviewService:
                 database,
                 accept_downloads=True,
             )
-            page = context.pages[0] if context.pages else context.new_page()
-            page.goto(
-                self.login_url(database),
-                wait_until="domcontentloaded",
-                timeout=self.navigation_timeout_ms,
-            )
-            page.bring_to_front()
-            if self._try_saved_login(database, page):
-                context.close()
-                self.login_confirmed = True
-                return f"{database} signed in using Windows Credential Manager."
-            deadline = datetime.now(timezone.utc).timestamp() + maximum_minutes * 60
             try:
-                while context.pages and datetime.now(timezone.utc).timestamp() < deadline:
-                    active_page = context.pages[0]
+                self._check_cancelled()
+                pages = context.pages
+                page = pages[0] if pages else context.new_page()
+                page.goto(
+                    self.login_url(database),
+                    wait_until="domcontentloaded",
+                    timeout=min(self.navigation_timeout_ms, 15_000),
+                )
+                self._check_cancelled()
+                page.bring_to_front()
+                if self._try_saved_login(database, page):
+                    self.login_confirmed = True
+                    return f"{database}: Innlogget."
+                deadline = time.monotonic() + maximum_minutes * 60
+                while time.monotonic() < deadline:
+                    self._check_cancelled()
+                    pages = context.pages
+                    if not pages:break
+                    active_page = pages[0]
                     if self._session_authenticated(database, active_page):
                         self.login_confirmed = True
-                        return f"{database} sign-in confirmed; browser profile released."
-                    active_page.wait_for_timeout(500)
+                        return f"{database}: Innlogget."
+                    # Back can leave an empty tab open. It is not a successful
+                    # session, and must not hold the profile for five minutes.
+                    if active_page.url in ('about:blank', 'about:newtab', 'edge://newtab/'):
+                        break
+                    self._interruptible_page_wait(active_page, 250)
             except browser_error:
                 pass
             finally:
@@ -239,7 +252,7 @@ class BrowserReviewService:
                     context.close()
                 except browser_error:
                     pass
-        return f"{database} sign-in window closed; session will be checked during lookup."
+        return f"{database}: Innlogging ikke bekreftet."
 
 
     def search_variants(
@@ -275,6 +288,7 @@ class BrowserReviewService:
         ]
         jobs = [(database, pending) for database, pending in jobs if pending]
         for database_index, (database, pending_variants) in enumerate(jobs):
+            self.authenticated_sources.discard(database)
             self._check_cancelled()
             if activity:
                 activity(database, "Starting provider")
@@ -298,6 +312,15 @@ class BrowserReviewService:
             published: dict[str, DatabaseEvidence] = {}
 
             def persist_result(variant: VariantRecord, evidence: DatabaseEvidence) -> None:
+                # Never carry a historical login flag from a retained result.
+                evidence.raw.pop('auth_verified', None)
+                evidence.raw.pop('auth_verified_at', None)
+                login_required=(evidence.status in {'login_required', 'authentication_failed'}
+                    or evidence.raw.get('failure_kind') == 'login_required')
+                if login_required:self.authenticated_sources.discard(database)
+                if database in self.authenticated_sources:
+                    evidence.raw['auth_verified'] = True
+                    evidence.raw['auth_verified_at'] = datetime.now(timezone.utc).isoformat()
                 query_attempts = evidence.raw.get("query_attempts", [])
                 try:
                     write_evidence_audit(
@@ -3380,21 +3403,35 @@ class BrowserReviewService:
         population_heading = page.get_by_role(
             "heading", name="Population Frequencies", exact=True
         )
+        clinical_heading = page.get_by_role(
+            "heading", name="Clinical evidence", exact=True
+        )
         prediction_heading.wait_for(
             state="visible", timeout=self.navigation_timeout_ms
         )
         population_heading.wait_for(
             state="visible", timeout=self.navigation_timeout_ms
         )
+        clinical_heading.wait_for(
+            state="visible", timeout=self.navigation_timeout_ms
+        )
+        verification = _franklin_identity(page.locator("body").inner_text(), page.url, variant)
+        if not verification.accepted:
+            raise ValueError(f"Franklin assessment identity mismatch: {verification.reason}")
         prediction_section = page.locator("div.section").filter(
             has=prediction_heading
         )
         population_section = page.locator("div.section").filter(
             has=population_heading
         )
-        if prediction_section.count() != 1 or population_section.count() != 1:
+        clinical_section = page.locator("div.section").filter(
+            has=clinical_heading
+        )
+        if any(section.count() != 1 for section in (
+            prediction_section, population_section, clinical_section,
+        )):
             raise ValueError(
-                "Franklin prediction/population evidence panels were ambiguous."
+                "Franklin prediction/population/clinical evidence panels were ambiguous."
             )
         base_path = self._screenshot_path(
             artifact_directory, "Franklin", variant
@@ -3408,83 +3445,118 @@ class BrowserReviewService:
                 population_section,
                 "population-frequencies",
             ),
+            ("Clinical evidence", clinical_heading, clinical_section, "clinical-evidence"),
         ):
+            if section is clinical_section:
+                toggle = section.locator(".frequency-details-toggle")
+                if toggle.count() > 1:
+                    raise ValueError("Franklin clinical evidence expansion was ambiguous.")
+                if toggle.count() == 1 and toggle.inner_text().strip() == "See all evidences":
+                    toggle.click()
             self._wait_for_franklin_section_stability(page, section)
-            heading.evaluate("el => el.scrollIntoView({block: 'start'})")
-            page.evaluate("window.scrollTo(0, Math.max(0, window.scrollY - 20))")
             screenshot_path = base_path.with_name(
                 f"{base_path.stem}-{suffix}{base_path.suffix}"
             )
-            heading_box = heading.bounding_box()
-            section_box = section.bounding_box()
-            if heading_box is None or section_box is None:
-                raise ValueError(f"Franklin {label} panel was not visible.")
-            dimensions = section.evaluate(
-                """
-                el => {
-                  const root = el.getBoundingClientRect();
-                  const descendants = [el, ...el.querySelectorAll('*')]
-                    .map(node => node.getBoundingClientRect())
-                    .filter(rect => rect.width > 0 && rect.height > 0);
-                  return {
-                    width: Math.max(
-                      el.scrollWidth,
-                      ...descendants.map(rect => rect.right - root.left)
-                    ),
-                    height: Math.max(
-                      el.scrollHeight,
-                      ...descendants.map(rect => rect.bottom - root.top)
-                    )
-                  };
-                }
-                """
-            )
-            left = min(float(heading_box["x"]), float(section_box["x"]))
-            top = min(float(heading_box["y"]), float(section_box["y"]))
-            right = max(
-                float(heading_box["x"] + heading_box["width"]),
-                float(section_box["x"])
-                + max(float(section_box["width"]), float(dimensions.get("width") or 0)),
-            )
-            bottom = max(
-                float(heading_box["y"] + heading_box["height"]),
-                float(section_box["y"])
-                + max(float(section_box["height"]), float(dimensions.get("height") or 0)),
-            )
-            clip_top = max(0, top - 64)
-            clip_left = max(0, left)
-            clip = {
-                "x": clip_left,
-                "y": clip_top,
-                "width": right - clip_left + 16,
-                "height": bottom - clip_top,
-            }
-            self._capture_with_incident_retry(
-                page,
-                screenshot_path,
-                lambda path=screenshot_path, area=clip: page.screenshot(
-                    path=str(path), clip=area
-                ),
-            )
+            # Assessment cards can grow past Franklin's internal scroll panel.
+            # Expose their full rendered height without changing source content.
+            selector = {
+                "predictions": "div.section#predictions",
+                "population-frequencies": "div.section#frequencies",
+                "clinical-evidence": "div.section#evidence",
+            }[suffix]
+            with expanded_capture_layout(page, selector):
+                self._capture_franklin_assessment_panel(
+                    page, label, heading, section, screenshot_path
+                )
             screenshots.append(
                 {"label": label, "path": str(screenshot_path), "url": assessment_url}
             )
         return screenshots
 
+    def _capture_franklin_assessment_panel(
+        self, page: Any, label: str, heading: Any, section: Any, screenshot_path: Path,
+    ) -> None:
+        heading.evaluate("el => el.scrollIntoView({block: 'start'})")
+        page.evaluate("window.scrollTo(0, Math.max(0, window.scrollY - 20))")
+        self._wait_for_franklin_section_stability(page, section)
+        heading_box = heading.bounding_box()
+        section_box = section.bounding_box()
+        if heading_box is None or section_box is None:
+            raise ValueError(f"Franklin {label} panel was not visible.")
+        dimensions = section.evaluate(
+            """
+            el => {
+              const root = el.getBoundingClientRect();
+              const descendants = [el, ...el.querySelectorAll('*')]
+                .map(node => node.getBoundingClientRect())
+                .filter(rect => rect.width > 0 && rect.height > 0);
+              return {
+                width: Math.max(
+                  el.scrollWidth,
+                  ...descendants.map(rect => rect.right - root.left)
+                ),
+                height: Math.max(
+                  el.scrollHeight,
+                  ...descendants.map(rect => rect.bottom - root.top)
+                )
+              };
+            }
+            """
+        )
+        left = min(float(heading_box["x"]), float(section_box["x"]))
+        top = min(float(heading_box["y"]), float(section_box["y"]))
+        right = max(
+            float(heading_box["x"] + heading_box["width"]),
+            float(section_box["x"])
+            + max(float(section_box["width"]), float(dimensions.get("width") or 0)),
+        )
+        bottom = max(
+            float(heading_box["y"] + heading_box["height"]),
+            float(section_box["y"])
+            + max(float(section_box["height"]), float(dimensions.get("height") or 0)),
+        )
+        clip_top = max(0, top - 64)
+        clip_left = max(0, left)
+        clip = {
+            "x": clip_left,
+            "y": clip_top,
+            "width": right - clip_left + 16,
+            "height": bottom - clip_top,
+        }
+        self._capture_with_incident_retry(
+            page,
+            screenshot_path,
+            lambda: page.screenshot(path=str(screenshot_path), clip=clip),
+        )
+
     def _wait_for_franklin_section_stability(self, page: Any, section: Any) -> None:
         """Wait until a dynamic Franklin assessment panel stops changing."""
-        previous: tuple[int, int] | None = None
+        previous: tuple[int, int, int] | None = None
         stable_reads = 0
-        for _ in range(8):
+        for _ in range(max(3, self.navigation_timeout_ms // 500)):
             self._check_cancelled()
             state = section.evaluate(
-                "el => ({height: el.scrollHeight, textLength: el.innerText.trim().length})"
+                """el => ({
+                    height: el.scrollHeight,
+                    textLength: el.innerText.trim().length,
+                    top: el.getBoundingClientRect().top + window.scrollY,
+                    loading: [...el.querySelectorAll(
+                        'gnx-loading-animation, mat-progress-spinner, [aria-busy="true"]'
+                    )].some(node => {
+                        const box = node.getBoundingClientRect();
+                        const style = getComputedStyle(node);
+                        return box.width > 0 && box.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    })
+                })"""
             )
             current = (
                 int(state.get("height") or 0),
                 int(state.get("textLength") or 0),
+                round(float(state.get("top") or 0)),
             )
-            if current == previous and current[0] > 0 and current[1] > 0:
+            if (current == previous and current[0] > 0 and current[1] > 0
+                    and not state.get("loading")):
                 stable_reads += 1
                 if stable_reads >= 2:
                     return
@@ -3492,6 +3564,7 @@ class BrowserReviewService:
                 stable_reads = 0
             previous = current
             page.wait_for_timeout(500)
+        raise TimeoutError("Franklin assessment panel did not finish rendering.")
 
     def _capture_mtbp_variant_screenshot(
         self,
@@ -3783,23 +3856,52 @@ class BrowserReviewService:
         return "login" in lowered or "signin" in lowered
 
     def _session_authenticated(self, database: str, page: Any) -> bool:
-        if database == "COSMIC":
-            return (
-                not self._login_required(database, page.url)
-                and page.get_by_role("link", name="log out", exact=False).count() >= 1
-            )
-        if database == "Franklin":
-            return not self._login_required(database, page.url) and page.locator("#email").count() == 0
+        current = urlsplit(page.url)
+        expected = urlsplit(self.login_url(database))
+        if current.scheme != 'https' or current.hostname != expected.hostname:
+            self.authenticated_sources.discard(database)
+            return False
+        if self._login_required(database, page.url):
+            self.authenticated_sources.discard(database)
+            return False
         if database == "ClinVar":
             return True
-        if database == "MTBP":
-            return (
-                not self._login_required(database, page.url)
-                and page.locator("#variant-input").count() == 1
-            )
-        return not self._login_required(database, page.url)
+        # A public landing page, blank tab or browser Back is not evidence of a
+        # login. Use positive controls from the authenticated application.
+        snapshot = page.evaluate("""() => ({
+            logout: [...document.querySelectorAll('a, button, [role="menuitem"]')]
+                .some(el => /^(?:log\\s*out|sign\\s*out)$/i.test((el.innerText || el.textContent || '').trim())
+                    || /(?:logout|signout)/i.test(el.getAttribute('href') || '')),
+            franklinSearch: !!document.querySelector("input[placeholder='Enter variant, gene or select an example above']"),
+            franklinUser: !!document.querySelector('.user-name'),
+            oncokbAccount: !!document.querySelector('#account-menu'),
+            mtbpInput: !!document.querySelector('#variant-input')
+        })""", timeout_ms=2_000) or {}
+        if database == "COSMIC":
+            verified = bool(snapshot.get('logout'))
+        elif database == "Franklin":
+            verified = bool(snapshot.get('logout') or (
+                current.path.startswith('/clinical-db/') and (snapshot.get('franklinSearch') or snapshot.get('franklinUser'))))
+        elif database == "MTBP":
+            verified = bool(snapshot.get('mtbpInput'))
+        elif database == "OncoKB":
+            # OncoKB renders this menu only when isUserAuthenticated is true;
+            # its Sign Out entry is mounted only after the menu is opened.
+            verified = bool(snapshot.get('logout') or snapshot.get('oncokbAccount'))
+        else:verified = False
+        if verified:self.authenticated_sources.add(database)
+        else:self.authenticated_sources.discard(database)
+        return verified
+
+    def _login_rejected(self, page: Any) -> bool:
+        return bool(page.evaluate("""() => {
+            const text = document.body?.innerText || '';
+            return /(?:invalid|incorrect|wrong)\\s+(?:username|email|password|credentials)|authentication failed|invalid user credentials/i.test(text);
+        }""", timeout_ms=2_000))
 
     def _try_saved_login(self, database: str, page: Any) -> bool:
+        self.login_credentials_verified = False
+        self._check_cancelled()
         if self._session_authenticated(database, page):
             return True
         if database == "Franklin" and self._wait_for_franklin_auth_or_form(page):
@@ -3827,6 +3929,7 @@ class BrowserReviewService:
         if not email or not password:
             return False
         try:
+            self._check_cancelled()
             if database == "COSMIC":
                 essential_cookies = page.get_by_role(
                     "button", name="Accept essential", exact=True
@@ -3849,20 +3952,25 @@ class BrowserReviewService:
                 page.locator(submit_selector).filter(has_text=re.compile(r"^SIGN IN$", re.I)).click()
             else:
                 page.locator(submit_selector).click()
-            page.wait_for_url(
-                lambda url: not self._login_required(database, url),
-                timeout=60_000,
-            )
-            if database == "MTBP" and "/analyse" not in page.url:
-                self._goto_with_retries(page, self.login_url("MTBP"))
-            page.wait_for_timeout(750)
-            return self._session_authenticated(database, page)
+            deadline = time.monotonic() + min(15_000, self.navigation_timeout_ms) / 1_000
+            while time.monotonic() < deadline:
+                self._check_cancelled()
+                if database == "MTBP" and not self._login_required(database, page.url) and "/analyse" not in page.url:
+                    self._goto_with_retries(page, self.login_url("MTBP"))
+                if self._session_authenticated(database, page):
+                    self.login_credentials_verified = True
+                    return True
+                if self._login_rejected(page):return False
+                self._interruptible_page_wait(page, 250)
+            return False
         except Exception:
-            # SPA navigation can detach the sign-in button after the server has
-            # already accepted the login. Trust the resulting authenticated URL
-            # instead of reporting a false login failure and skipping all queries.
+            # SPA navigation can detach the form because an existing cookie
+            # already authenticated the page. Keep that valid session, but never
+            # treat an interrupted submission as proof of the entered password.
             try:
-                return self._session_authenticated(database, page)
+                self._check_cancelled()
+                accepted = self._session_authenticated(database, page)
+                return accepted
             except Exception:
                 return False
 
@@ -3873,6 +3981,7 @@ class BrowserReviewService:
             min(5_000, self.navigation_timeout_ms) // 250,
         )
         for _ in range(attempts):
+            self._check_cancelled()
             if self._session_authenticated("Franklin", page):
                 return True
             if (
@@ -3880,7 +3989,7 @@ class BrowserReviewService:
                 and page.locator("#password").count() == 1
             ):
                 return False
-            page.wait_for_timeout(250)
+            self._interruptible_page_wait(page, 250)
         return self._session_authenticated("Franklin", page)
 
     def _wait_for_oncokb_result(self, page: Any) -> None:

@@ -33,6 +33,30 @@ remain verbatim. Missing OUM identifiers require manual entry in the import
 dialog; valid typed identifiers are uppercased. Supported exports represent one
 sample per file, and multiple supplied sample identifiers are rejected.
 
+One genomic source row may expose multiple purple transcript choices. Displayed
+source associations are provisional until exact-version NCBI gene lookup and an
+independent Mutalyzer comparison with the source REF/ALT confirm the selected
+annotation. Qualified HGVS references override source list positions; unqualified
+names are candidates and must match the same genomic event. Missing names can be
+recovered only from exact transcript equivalents and independently rechecked.
+When a genomic-context response omits its gene, the exact NCBI reference proof
+can supply it; a contradictory returned gene is always rejected. Temporary lookup
+or identity-check outages remain retryable through Retry failed.
+Proteins are retained only from a matching NM/NP prediction, never ambiguous list
+positions. Unresolved selected choices block database requests and finding exports;
+MTBP requires a complete valid selected batch. Each chosen annotation has independent identity/evidence. Rådata retains
+the physical source row once, with all child IDs and any-choice selection; Kilder
+retains the annotation mapping, checked identity and choices. Imported row counts
+remain source counts. Changed identity, approval or source binding invalidates proof
+and prior evidence. Reversed column repairs never modify the original cells.
+
+Source columns and per-variant screenshots follow Mutalyzer, SpliceAI,
+BRCA Exchange, OncoKB, COSMIC, ClinVar, MTBP and Franklin. Mutalyzer appears
+above the screenshots only for a verified name change from the imported variant;
+SpliceAI and BRCA sections require verified hits. Other source responses remain
+in Kilder, including skipped/unsuccessful optional-source searches. Franklin
+captures Predictions, Population Frequencies and expanded Clinical evidence.
+
 Original screenshots are embedded intact at up to 1120 px width without shrinking
 long captures to a fixed height. Valid MTBP geometry crops only the display copy;
 its original PNG remains unchanged. Shared full reports are not repeated under
@@ -61,9 +85,12 @@ remain visible; a separate exact NC(source NM):c context may yield a checked nam
 only after its returned hg19 reference and full genomic event agree.
 
 Identity review shows Unchanged, Normalized, Conflict or Review required.
-**Use checked name** copies a verified candidate and alleles into the form; it does
-not save or approve. Review, tick HGVS / mapping reviewed, and save. A current
-Conflict or unapproved changed name blocks downstream database queries. Original
+Independently confirmed new nomenclature is applied automatically to subsequent
+queries, the variant view and the workbook. It requires the same explicit source
+alleles, checked GRCh37 event and an accepted source/MANE candidate. It never
+chooses an arbitrary equivalent transcript. Original imported fields remain
+unchanged in Rådata. A current Conflict or unapproved manual change blocks
+downstream queries. **Use checked name** remains available for manual review. Original
 source fields and previous results remain intact. Conflicting green normalizer
 panels cannot be embedded as accepted evidence.
 
