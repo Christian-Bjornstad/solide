@@ -26,6 +26,11 @@ Local Windows / Python 3.12. Verification runs are dated below.
   base; the shared event normalizer now compares complete, explicitly GRCh37
   DNA events. Wrong assembly, coordinate, REF/ALT or protein remains rejected.
   A genomic-only query cannot fall back to an unidentified gene-only row.
+- A fresh full Mutalyzer/MTBP rerun of the 20 selected HRR variants then matched
+  **20/20 MTBP rows**, including PTEN c.254-1G>A, which the old cDNA-only reader
+  missed. Its Excel export completed without errors with 20 selected findings,
+  20 original raw rows and 22 images. Only the test-created portal report was
+  removed after capture; all source-file hashes remained unchanged.
 - The HRR COSMIC identifier COSM937333 returned zero Legacy Mutations and 15
   unrelated fuzzy results on the fully loaded website. A fresh live rerun now
   records no exact legacy match instead of a transient rendering failure;
