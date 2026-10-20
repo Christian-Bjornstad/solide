@@ -16,8 +16,7 @@ def test_variant_selection_filter_and_session(tmp_path):
     assert window.proxy.rowCount()==1
     window.select_visible(True)
     assert all(v.selected for v in window.session.variants)
-    window.save_to(tmp_path/'demo.solide.json')
-    assert (tmp_path/'demo.solide.json').exists()
+    assert not (tmp_path/'demo.solide.json').exists()
     window.close()
 
 
@@ -26,15 +25,16 @@ def test_english_navigation_and_identity_review_tab():
     app=QApplication.instance() or QApplication([])
     window=MainWindow()
     assert [window.nav.item(i).text() for i in range(window.nav.count())]==[
-        'Workspace','Searches','Reports','Settings']
+        'Import','Variants','Searches','Settings']
     window.session=Session(variants=[Variant(patient='DEMO',gene='EGFR',coverage=499,source_row=8)])
-    window.refresh();window.nav.setCurrentRow(0);window.show();app.processEvents()
+    window.refresh();window.nav.setCurrentRow(1);window.show();app.processEvents()
     window.variant_table.selectRow(0);app.processEvents()
     assert 'Source:' in window.detail.toPlainText()
     assert window.qc_model.item(0,3).text()=='Failed'
     assert 'on row 8' in window.qc_model.item(0,4).text()
     tabs=window.findChild(QTabWidget)
     assert tabs.tabText(1)=='Identity review'
+    window.details_toggle.setChecked(True)
     tabs.setCurrentIndex(1);app.processEvents()
     assert window.hgvs_edit.isVisible()
     window.close()
@@ -93,7 +93,7 @@ def test_retry_worker_counts_only_targeted_failures(monkeypatch,tmp_path):
     for v,status in ((a,'error'),(b,'not_found')):
         v.evidence['ClinVar']={'database':'ClinVar','status':status,'fingerprint':v.fingerprint('Other'),'summary':'Original'}
     window.session=Session(variants=[a,b]);window.session_path=tmp_path/'session.solide.json'
-    window.output_dir.setText(str(tmp_path));window.refresh()
+    window.refresh()
     for source,check in window.source_checks.items():check.setChecked(source=='ClinVar')
     window.start_queue('failed')
     deadline=time.monotonic()+5
@@ -107,14 +107,24 @@ def test_retry_worker_counts_only_targeted_failures(monkeypatch,tmp_path):
 
 
 def test_settings_store_password_in_vault_only(monkeypatch,tmp_path):
+    import time
     import solide.gui as gui
     stored=[]
+    class Browser:
+        login_confirmed=True
+        login_credentials_verified=True
+        def __init__(self,**kwargs):pass
+        def open_login(self,*args,**kwargs):return 'Franklin: Innlogget.'
+    monkeypatch.setattr(gui,'BrowserReviewService',Browser)
     monkeypatch.setattr(gui,'write_password',lambda *args:stored.append(args))
     monkeypatch.setattr(gui,'read_password',lambda *args:'synthetic-password-test' if stored else '')
     app=QApplication.instance() or QApplication([]);window=MainWindow()
     window.config={};window.config_path=tmp_path/'ui_config.json'
     window.account_username.setText('demo@example.org');window.account_password.setText('synthetic-password-test')
     window.save_account()
+    deadline=time.monotonic()+5
+    while window.active and time.monotonic()<deadline:app.processEvents();time.sleep(.005)
+    assert window.active is None
     assert stored and window.account_password.text()==''
     assert 'synthetic-password-test' not in window.config_path.read_text()
     window.save_settings()
@@ -129,6 +139,8 @@ def test_edge_sign_in_still_works_when_vault_unavailable(monkeypatch,tmp_path):
     calls=[]
     def unavailable(accounts):raise RuntimeError('Vault unavailable')
     class Browser:
+        login_confirmed=True
+        login_credentials_verified=False
         def __init__(self,**kwargs):calls.append(kwargs)
         def open_login(self,source,maximum_minutes):return f'{source} sign-in confirmed; browser profile released.'
     monkeypatch.setattr(gui,'browser_credentials',unavailable)
@@ -166,8 +178,8 @@ def test_assessment_dialog_saves_into_app_session(monkeypatch,tmp_path):
     window.refresh();window.variant_table.selectRow(0);app.processEvents();window.assess_variant()
     assert window.session.variants[0].classification=='VUS'
     assert 'Manual assessment' in window.detail.toPlainText()
-    from solide.session import load_session
-    assert load_session(window.session_path).variants[0].report_decision=='Include'
+    assert window.session.variants[0].report_decision=='Include'
+    assert not window.session_path.exists()
     assert window.session.history[-1]['event']=='assessment'
     window.close()
 

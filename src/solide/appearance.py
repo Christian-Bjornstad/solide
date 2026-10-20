@@ -21,5 +21,5 @@ def light_palette():
 
 def text_pixels(value):
     try:value=int(value)
-    except (TypeError,ValueError):return 16
+    except (TypeError,ValueError,OverflowError):return 16
     return value if value in (14,16,18,20) else 16

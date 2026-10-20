@@ -17,15 +17,16 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
 from solide._vendor.archer.core.models import DatabaseEvidence, VariantRecord
 from solide._vendor.archer.services.genomic_notation import format_mtbp_grch37
+from solide._vendor.archer.services.mtbp_report_dom import MTBP_TABLE_ROWS_JS
 from solide._vendor.archer.services.capture_layout import expanded_capture_layout
 from solide._vendor.archer.services.provider_failures import (
     ProviderFailureKind,
     ProviderLookupError,
 )
 from solide._vendor.archer.services.evidence_audit import (
-    is_completed_evidence, persist_evidence_result, write_evidence_audit,
+    MTBP_MATCHING_REVISION, is_completed_evidence, persist_evidence_result, write_evidence_audit,
 )
-from solide._vendor.archer.services.browser_popups import dismiss_known_overlays
+from solide._vendor.archer.services.browser_popups import dismiss_known_overlays, dismiss_franklin_onboarding
 from solide._vendor.archer.services.capture_validation import (
     CaptureValidation,
     IncompleteCaptureError,
@@ -36,6 +37,20 @@ from solide._vendor.archer.services.variant_identity import (
     IdentityVerification,
     genomic_identity,
 )
+
+
+class _ClinVarRenderingTimeout(TimeoutError):
+    def __init__(self, diagnostics: dict[str, object]) -> None:
+        super().__init__("ClinVar did not finish rendering the website result.")
+        self.diagnostics = {"render_diagnostics": diagnostics}
+
+
+
+class _OncoKBRenderingTimeout(TimeoutError):
+    def __init__(self, diagnostics: dict[str, object]) -> None:
+        super().__init__("OncoKB did not finish rendering the variant result.")
+        self.diagnostics = {"render_diagnostics": diagnostics}
+
 
 
 BROWSER_DATABASES = ("COSMIC", "OncoKB", "Franklin", "ClinVar", "MTBP")
@@ -142,7 +157,10 @@ class BrowserReviewService:
         self.pause_wait = pause_wait or (lambda: None)
         self.browser_background = bool(browser_background)
         self.capture_validator = capture_validator
-        self._cosmic_cache: dict[str, DatabaseEvidence] = {}
+        self._cosmic_cache: dict[tuple[str, ...], DatabaseEvidence] = {}
+        self.login_confirmed = False
+        self.login_credentials_verified = False
+        self.authenticated_sources: set[str] = set()
         self._mtbp_rejected_transcript_queries: set[str] = set()
         self._variant_result_callback: Callable[[VariantRecord, DatabaseEvidence], None] | None = None
 
@@ -189,39 +207,44 @@ class BrowserReviewService:
 
     def open_login(self, database: str, *, maximum_minutes: int = 30) -> str:
         """Open login and release the profile as soon as authentication succeeds."""
+        self.login_confirmed = False
+        self.login_credentials_verified = False
+        self._check_cancelled()
         sync_browser, browser_error, _ = self._browser_api()
-        profile = self.profile_directory(database)
         with sync_browser() as runtime:
-            try:
-                context = runtime.chromium.launch_persistent_context(
-                    str(profile),
-                    channel=self.channel,
-                    headless=False,
-                    accept_downloads=True,
-                )
-            except Exception as exc:
-                raise BrowserAutomationUnavailable(
-                    "Could not start Microsoft Edge for browser review. "
-                    "Confirm that managed Edge is installed and its "
-                    "RemoteDebuggingAllowed policy is enabled."
-                ) from exc
-            page = context.pages[0] if context.pages else context.new_page()
-            page.goto(
-                self.login_url(database),
-                wait_until="domcontentloaded",
-                timeout=self.navigation_timeout_ms,
+            context = self._launch_browser_context(
+                runtime,
+                database,
+                accept_downloads=True,
             )
-            page.bring_to_front()
-            if self._try_saved_login(database, page):
-                context.close()
-                return f"{database} signed in using Windows Credential Manager."
-            deadline = datetime.now(timezone.utc).timestamp() + maximum_minutes * 60
             try:
-                while context.pages and datetime.now(timezone.utc).timestamp() < deadline:
-                    active_page = context.pages[0]
+                self._check_cancelled()
+                pages = context.pages
+                page = pages[0] if pages else context.new_page()
+                page.goto(
+                    self.login_url(database),
+                    wait_until="domcontentloaded",
+                    timeout=min(self.navigation_timeout_ms, 15_000),
+                )
+                self._check_cancelled()
+                page.bring_to_front()
+                if self._try_saved_login(database, page):
+                    self.login_confirmed = True
+                    return f"{database}: Innlogget."
+                deadline = time.monotonic() + maximum_minutes * 60
+                while time.monotonic() < deadline:
+                    self._check_cancelled()
+                    pages = context.pages
+                    if not pages:break
+                    active_page = pages[0]
                     if self._session_authenticated(database, active_page):
-                        return f"{database} sign-in confirmed; browser profile released."
-                    active_page.wait_for_timeout(500)
+                        self.login_confirmed = True
+                        return f"{database}: Innlogget."
+                    # Back can leave an empty tab open. It is not a successful
+                    # session, and must not hold the profile for five minutes.
+                    if active_page.url in ('about:blank', 'about:newtab', 'edge://newtab/'):
+                        break
+                    self._interruptible_page_wait(active_page, 250)
             except browser_error:
                 pass
             finally:
@@ -229,7 +252,8 @@ class BrowserReviewService:
                     context.close()
                 except browser_error:
                     pass
-        return f"{database} sign-in window closed; session will be checked during lookup."
+        return f"{database}: Innlogging ikke bekreftet."
+
 
     def search_variants(
         self,
@@ -264,6 +288,7 @@ class BrowserReviewService:
         ]
         jobs = [(database, pending) for database, pending in jobs if pending]
         for database_index, (database, pending_variants) in enumerate(jobs):
+            self.authenticated_sources.discard(database)
             self._check_cancelled()
             if activity:
                 activity(database, "Starting provider")
@@ -287,6 +312,15 @@ class BrowserReviewService:
             published: dict[str, DatabaseEvidence] = {}
 
             def persist_result(variant: VariantRecord, evidence: DatabaseEvidence) -> None:
+                # Never carry a historical login flag from a retained result.
+                evidence.raw.pop('auth_verified', None)
+                evidence.raw.pop('auth_verified_at', None)
+                login_required=(evidence.status in {'login_required', 'authentication_failed'}
+                    or evidence.raw.get('failure_kind') == 'login_required')
+                if login_required:self.authenticated_sources.discard(database)
+                if database in self.authenticated_sources:
+                    evidence.raw['auth_verified'] = True
+                    evidence.raw['auth_verified_at'] = datetime.now(timezone.utc).isoformat()
                 query_attempts = evidence.raw.get("query_attempts", [])
                 try:
                     write_evidence_audit(
@@ -361,6 +395,113 @@ class BrowserReviewService:
                 )
         return results
 
+    def _launch_browser_context(self, runtime, database: str, **options):
+        """Keep startup diagnostics at the boundary, before any site is read."""
+        from solide._vendor.archer.services.edge_cdp import EdgeCdpError, EdgeCdpTimeout
+
+        self._validate_database(database)
+        profile = self.profile_root / database.lower().replace(" ", "-")
+        try:
+            return runtime.chromium.launch_persistent_context(
+                str(self.profile_directory(database)), channel=self.channel,
+                headless=False, accept_downloads=options.pop("accept_downloads", True),
+                **options,
+            )
+        except Exception as exc:
+            detail = (
+                str(exc) if isinstance(exc, (EdgeCdpError, EdgeCdpTimeout, OSError))
+                else "Unexpected startup failure"
+            )
+            raise BrowserAutomationUnavailable(
+                f"Could not start Microsoft Edge for {database}.\n"
+                f"Profile: {profile}\nActual startup error: {type(exc).__name__}: {detail}"
+            ) from exc
+
+
+    def _capture_franklin_assessment_with_retry(
+        self, page: Any, variant: VariantRecord, artifact_directory: Path,
+    ) -> list[dict[str, str]]:
+        """Reload only the resolved assessment view once after a transient failure."""
+        for attempt in range(2):
+            self._check_cancelled()
+            try:
+                dismiss_franklin_onboarding(page)
+                return self._capture_franklin_assessment(page, variant, artifact_directory)
+            except Exception as exc:
+                if attempt or not _transient_browser_failure(exc):
+                    raise
+                self._interruptible_page_wait(page, 750)
+        raise RuntimeError("Franklin assessment retry ended unexpectedly.")
+
+
+    def _persist_mtbp_report_audit(
+        self, audit_path: Path, variant: VariantRecord, evidence: DatabaseEvidence,
+    ) -> None:
+        """Checkpoint the identity-qualified audit used by resume before cleanup."""
+        query_attempts = evidence.raw.get("query_attempts", [])
+        self._write_audit(evidence, audit_path)
+        write_evidence_audit(
+            audit_path.parent, "MTBP", variant, evidence,
+            query_attempts=query_attempts if isinstance(query_attempts, list) else [],
+        )
+
+
+    def _wait_for_clinvar_result(
+        self, page: Any
+    ) -> tuple[str, list[dict[str, str]]]:
+        """Read a completed search or record before deciding identity or absence."""
+        for poll in range(max(1, self.navigation_timeout_ms // 250) + 1):
+            self._check_cancelled()
+            body_text = page.locator("body").inner_text(
+                timeout=self.navigation_timeout_ms
+            )
+            diagnostics: dict[str, object] = {
+                "page_type": "record" if "/clinvar/variation/" in page.url else "search",
+                "record_metadata": bool(re.search(r"\b(?:Variation ID|VCV\d+)", body_text, re.I)),
+                "hgvs_title": False,
+                "genomic_location": bool(_clinvar_locations(body_text)),
+                "result_links": 0,
+            }
+            if diagnostics["page_type"] == "record":
+                # Readiness is separate from acceptance: a complete GRCh38 or
+                # differently sized record must reach the strict identity check.
+                diagnostics["hgvs_title"] = bool(re.search(
+                    r"(?m)^[ \t]*(?:[A-Za-z][\w.-]*[ \t]*"
+                    r"\([A-Za-z][\w.-]*\)[ \t]*:[ \t]*|"
+                    r"(?!(?:HGVS|Name|Gene|Location|Variation|Accession)\b)"
+                    r"[A-Za-z][A-Za-z0-9-]*(?:[ \t]*:[ \t]*|[ \t]+))"
+                    r"[cnpg]\.\S+",
+                    body_text, re.I,
+                ))
+                if all(diagnostics[field] for field in (
+                    "record_metadata", "genomic_location", "hgvs_title"
+                )):
+                    return body_text, []
+            else:
+                links = page.locator("a[href*='/clinvar/variation/']").evaluate_all(
+                    "nodes => nodes.map(node => ({"
+                    "text: (node.closest('tr, article, li, .rprt')?.innerText || "
+                    "node.parentElement?.innerText || node.innerText).trim(), "
+                    "href: node.href}))"
+                )
+                diagnostics["result_links"] = len(links)
+                if any(
+                    isinstance(item, dict)
+                    and item.get("href")
+                    and re.search(r"\b[cnpg]\.", str(item.get("text") or ""), re.I)
+                    for item in links
+                ):
+                    return body_text, links
+                if re.search(
+                    r"\b(?:no (?:items|results)(?: were)? found|0 results|"
+                    r"your search did not find|search results:\s*0\s+variants?\b)", body_text, re.I,
+                ):
+                    return body_text, []
+            if poll < max(1, self.navigation_timeout_ms // 250):
+                self._interruptible_page_wait(page, 250)
+        raise _ClinVarRenderingTimeout(diagnostics)
+
+
     def _search_database(
         self,
         database: str,
@@ -401,19 +542,13 @@ class BrowserReviewService:
         artifact_directory.mkdir(parents=True, exist_ok=True)
         results: dict[str, DatabaseEvidence] = {}
         with sync_browser() as runtime:
-            try:
-                context = runtime.chromium.launch_persistent_context(
-                    str(self.profile_directory(database)),
-                    channel=self.channel,
-                    headless=False,
-                    accept_downloads=True,
-                    viewport={"width": 1440, "height": 1000},
-                    background=self.browser_background,
-                )
-            except Exception as exc:
-                raise BrowserAutomationUnavailable(
-                    "Could not start Microsoft Edge for browser review."
-                ) from exc
+            context = self._launch_browser_context(
+                runtime,
+                database,
+                accept_downloads=True,
+                viewport={"width": 1440, "height": 1000},
+                background=self.browser_background,
+            )
             page = context.pages[0] if context.pages else context.new_page()
             try:
                 if database == "OncoKB" and self.oncokb_email and self.oncokb_password:
@@ -486,6 +621,7 @@ class BrowserReviewService:
                     pass
         return results
 
+
     def _search_cosmic(
         self,
         variants: list[VariantRecord],
@@ -494,23 +630,35 @@ class BrowserReviewService:
         progress: Callable[[str], None] | None,
     ) -> dict[str, DatabaseEvidence]:
         """Capture the licensed COSMIC mutation page by Archer COSMICID."""
+        searchable_variants = [
+            variant for variant in variants if _cosmic_identifiers(variant.cosmic_id)
+        ]
+        results: dict[str, DatabaseEvidence] = {
+            self.variant_key(variant): DatabaseEvidence(
+                "COSMIC",
+                "not_applicable",
+                "ingen COSMIC-ID",
+                accession=variant.cosmic_id,
+                raw={
+                    "failure_kind": ProviderFailureKind.NOT_FOUND.value,
+                    "query_attempts": [],
+                },
+            )
+            for variant in variants
+            if not _cosmic_identifiers(variant.cosmic_id)
+        }
+        if not searchable_variants:
+            return results
         sync_browser, browser_error, _ = self._browser_api()
         artifact_directory.mkdir(parents=True, exist_ok=True)
-        results: dict[str, DatabaseEvidence] = {}
         with sync_browser() as runtime:
-            try:
-                context = runtime.chromium.launch_persistent_context(
-                    str(self.profile_directory("COSMIC")),
-                    channel=self.channel,
-                    headless=False,
-                    accept_downloads=True,
-                    viewport={"width": 1440, "height": 1000},
-                    background=self.browser_background,
-                )
-            except Exception as exc:
-                raise BrowserAutomationUnavailable(
-                    f"Could not start COSMIC in Edge. Actual startup error: {exc}"
-                ) from exc
+            context = self._launch_browser_context(
+                runtime,
+                "COSMIC",
+                accept_downloads=True,
+                viewport={"width": 1440, "height": 1000},
+                background=self.browser_background,
+            )
             page = context.pages[0] if context.pages else context.new_page()
             try:
                 page.goto(
@@ -518,8 +666,9 @@ class BrowserReviewService:
                     wait_until="domcontentloaded",
                     timeout=self.navigation_timeout_ms,
                 )
+                self._ensure_cosmic_grch37(page)
                 if not self._try_saved_login("COSMIC", page):
-                    return {
+                    results.update({
                         self.variant_key(variant): DatabaseEvidence(
                             "COSMIC",
                             "login_required",
@@ -528,16 +677,17 @@ class BrowserReviewService:
                             accession=variant.cosmic_id,
                             url=page.url,
                         )
-                        for variant in variants
-                    }
-
+                        for variant in searchable_variants
+                    })
+                    return results
                 self._ensure_cosmic_grch37(page)
-                for index, variant in enumerate(variants, start=1):
+
+                for index, variant in enumerate(searchable_variants, start=1):
                     self._check_cancelled()
                     key = self.variant_key(variant)
                     if progress:
                         progress(
-                            f"COSMIC browser lookup {index}/{len(variants)}: "
+                            f"COSMIC browser lookup {index}/{len(searchable_variants)}: "
                             f"{variant.cosmic_id}"
                         )
                     try:
@@ -556,7 +706,7 @@ class BrowserReviewService:
                             url=self.query_url("COSMIC", variant),
                         )
                     self._publish_variant_result(variant, results[key])
-                    if index < len(variants):
+                    if index < len(searchable_variants):
                         self._wait_between_queries(page, "COSMIC", progress=progress)
             finally:
                 try:
@@ -564,6 +714,7 @@ class BrowserReviewService:
                 except browser_error:
                     pass
         return results
+
 
     def _lookup_cosmic_variant(
         self,
@@ -588,10 +739,15 @@ class BrowserReviewService:
         attempts: list[str] = []
         attempt_results: list[dict[str, str]] = []
         last_result: DatabaseEvidence | None = None
+        conflicting_result: DatabaseEvidence | None = None
         for cosmic_id in identifiers:
             attempts.append(cosmic_id)
-            if cosmic_id in self._cosmic_cache:
-                result = deepcopy(self._cosmic_cache[cosmic_id])
+            cache_key = (
+                cosmic_id, variant.symbol, variant.hgvsc, variant.hgvsp,
+                variant.genomic_location, variant.ref_allele, variant.alt_allele,
+            )
+            if cache_key in self._cosmic_cache:
+                result = deepcopy(self._cosmic_cache[cache_key])
                 if progress:
                     progress(f"COSMIC cache hit: {cosmic_id}")
             else:
@@ -604,7 +760,7 @@ class BrowserReviewService:
                     progress=progress,
                 )
                 if result.status == "found":
-                    self._cosmic_cache[cosmic_id] = deepcopy(result)
+                    self._cosmic_cache[cache_key] = deepcopy(result)
             result.raw["query_attempts"] = list(attempts)
             attempt_results.append(
                 {"query": cosmic_id, "status": result.status}
@@ -613,8 +769,21 @@ class BrowserReviewService:
             if result.status == "found":
                 return result
             last_result = result
+            if result.status == "identity_mismatch":
+                conflicting_result = result
             if result.status not in {"not_found", "identity_mismatch"}:
                 return result
+        if conflicting_result is not None:
+            return DatabaseEvidence(
+                "COSMIC", "manual_review",
+                "COSMIC resolved an identifier to a different variant; none of the "
+                "remaining identifiers produced a verified match. Review the source identifiers.",
+                accession=conflicting_result.accession, url=conflicting_result.url,
+                raw={**conflicting_result.raw,
+                    "failure_kind": ProviderFailureKind.IDENTITY_MISMATCH.value,
+                    "query_attempts": list(attempts),
+                    "query_attempt_results": list(attempt_results)},
+            )
         if last_result is not None:
             return last_result
         return DatabaseEvidence(
@@ -623,6 +792,7 @@ class BrowserReviewService:
             "No COSM/COSV identifier was available.",
             raw={"failure_kind": ProviderFailureKind.NOT_FOUND.value},
         )
+
 
     def _lookup_cosmic_with_retry(
         self,
@@ -659,13 +829,29 @@ class BrowserReviewService:
                 )
             except ProviderLookupError as exc:
                 if exc.kind != ProviderFailureKind.TRANSIENT or attempt == 1:
+                    diagnostic = {}
+                    if exc.kind == ProviderFailureKind.TRANSIENT:
+                        # Keep failure evidence local, outside successful capture
+                        # records, so a next export can diagnose the actual page.
+                        try:
+                            diagnostic["visible_text_preview"] = page.locator("body").inner_text()[:12_000]
+                        except Exception:
+                            pass
+                        try:
+                            artifact_directory.mkdir(parents=True, exist_ok=True)
+                            base = self._screenshot_path(artifact_directory, "COSMIC", variant)
+                            path = base.with_name(f"{base.stem}-lookup-timeout.png")
+                            page.screenshot(path=str(path), full_page=False)
+                            diagnostic["diagnostic_screenshot"] = str(path)
+                        except Exception:
+                            diagnostic["diagnostic_capture_error"] = "COSMIC diagnostic screenshot was unavailable."
                     return DatabaseEvidence(
                         "COSMIC",
                         exc.kind.value,
                         str(exc),
                         accession=_cosmic_identifier(variant.cosmic_id),
                         url=page.url,
-                        raw={"failure_kind": exc.kind.value},
+                        raw={"failure_kind": exc.kind.value, **exc.diagnostics, **diagnostic},
                     )
             except Exception as exc:
                 if attempt == 1 or not _transient_browser_failure(exc):
@@ -677,6 +863,7 @@ class BrowserReviewService:
                 )
             self._interruptible_page_wait(page, 750)
         raise RuntimeError("COSMIC retry loop ended unexpectedly.")
+
 
     def _resolve_cosmic_mutation_page(
         self, page: Any, variant: VariantRecord
@@ -718,7 +905,11 @@ class BrowserReviewService:
             else:
                 raise ProviderLookupError(
                     ProviderFailureKind.TRANSIENT,
-                    f"COSMIC did not finish rendering a canonical mutation link for {variant.cosmic_id}."
+                    f"COSMIC did not finish rendering a canonical mutation link for {variant.cosmic_id}.",
+                    diagnostics={
+                        "failure_stage": "canonical_link_resolution",
+                        "render_diagnostics": {"page_type": "search", "result_links": 0},
+                    },
                 )
 
         grch37_links = page.locator("a[href*='genome=37'][href*='id=']")
@@ -742,6 +933,10 @@ class BrowserReviewService:
             raise ProviderLookupError(
                 ProviderFailureKind.TRANSIENT,
                 "COSMIC did not finish rendering a GRCh37 mutation link.",
+                diagnostics={
+                    "failure_stage": "assembly_link_resolution",
+                    "render_diagnostics": {"page_type": "record", "result_links": 0},
+                },
             )
         if len(candidates) > 1:
             raise ProviderLookupError(
@@ -754,6 +949,7 @@ class BrowserReviewService:
             timeout=self.navigation_timeout_ms,
         )
         self._verify_cosmic_grch37(page)
+
 
     def _search_clinvar(
         self,
@@ -773,19 +969,11 @@ class BrowserReviewService:
         )
         results: dict[str, DatabaseEvidence] = {}
         with sync_browser() as runtime:
-            try:
-                context = runtime.chromium.launch_persistent_context(
-                    str(self.profile_directory("ClinVar")),
-                    channel=self.channel,
-                    headless=False,
-                    accept_downloads=True,
-                    viewport={"width": 1440, "height": 1000},
-                    background=self.browser_background,
-                )
-            except Exception as exc:
-                raise BrowserAutomationUnavailable(
-                    f"Could not start ClinVar in Edge. Actual startup error: {exc}"
-                ) from exc
+            context = self._launch_browser_context(
+                runtime, "ClinVar", accept_downloads=True,
+                viewport={"width": 1440, "height": 1000},
+                background=self.browser_background,
+            )
             page = context.pages[0] if context.pages else context.new_page()
             try:
                 for index, variant in enumerate(variants, start=1):
@@ -830,7 +1018,19 @@ class BrowserReviewService:
                             accession=api_evidence.accession,
                             clinical_significance=api_evidence.clinical_significance,
                             url=api_evidence.url,
-                            raw={**api_evidence.raw},
+                            raw={
+                                **api_evidence.raw,
+                                "failure_stage": (
+                                    "result_rendering" if isinstance(exc, _ClinVarRenderingTimeout)
+                                    else "summary_capture"
+                                ),
+                                "failure_kind": (
+                                    ProviderFailureKind.TRANSIENT.value
+                                    if _transient_browser_failure(exc)
+                                    else ProviderFailureKind.LAYOUT_CHANGED.value
+                                ),
+                                **getattr(exc, "diagnostics", {}),
+                            },
                         )
                     self._publish_variant_result(variant, results[key])
                     if index < len(variants):
@@ -849,6 +1049,7 @@ class BrowserReviewService:
         page: Any,
         artifact_directory: Path,
     ) -> DatabaseEvidence:
+        self._wait_for_clinvar_result(page)
         title = page.locator("main div.functions-container")
         summary = page.locator("#germline-somatic-info")
         title.wait_for(state="visible", timeout=self.navigation_timeout_ms)
@@ -941,15 +1142,20 @@ class BrowserReviewService:
         cosmic_id = _cosmic_identifier(variant.cosmic_id)
         cdna = _cdna_change(variant.hgvsc)
         protein = _protein_change(variant.hgvsp)
+        identifier_matches = cosmic_id in _cosmic_identifiers(body_text)
         variant_identity_matches = bool(
             variant.symbol
-            and variant.symbol.casefold() in body_text.casefold()
+            and re.search(
+                r"(?<![A-Za-z0-9_-])" + re.escape(variant.symbol)
+                + r"(?![A-Za-z0-9_-])", body_text, re.I,
+            )
             and any(
-                value and value.casefold() in body_text.casefold()
+                value not in {"", "?", "=", "-", "."}
+                and _contains_hgvs_change(body_text, value)
                 for value in (cdna, protein)
             )
         )
-        if cosmic_id and cosmic_id not in body_text and not variant_identity_matches:
+        if cosmic_id and not identifier_matches and not variant_identity_matches:
             return DatabaseEvidence(
                 "COSMIC",
                 "identity_mismatch",
@@ -1041,19 +1247,13 @@ class BrowserReviewService:
         context = None
         try:
             with sync_browser() as runtime:
-                try:
-                    context = runtime.chromium.launch_persistent_context(
-                        str(self.profile_directory("Franklin")),
-                        channel=self.channel,
-                        headless=False,
-                        accept_downloads=True,
-                        viewport={"width": 1440, "height": 1000},
-                        background=self.browser_background,
-                    )
-                except Exception as exc:
-                    raise BrowserAutomationUnavailable(
-                        f"Could not start Franklin in Edge. Actual startup error: {exc}"
-                    ) from exc
+                context = self._launch_browser_context(
+                    runtime,
+                    "Franklin",
+                    accept_downloads=True,
+                    viewport={"width": 1440, "height": 1000},
+                    background=self.browser_background,
+                )
                 page = context.pages[0] if context.pages else context.new_page()
                 if self.franklin_email and self.franklin_password:
                     page.goto(
@@ -1122,6 +1322,7 @@ class BrowserReviewService:
                 except browser_error:
                     pass
         return results
+
 
     def _resolve_franklin_queries(
         self,
@@ -1213,6 +1414,7 @@ class BrowserReviewService:
             )
             dismiss_known_overlays(page)
             stage = "waiting for the Franklin search input"
+            dismiss_franklin_onboarding(page)
             search = page.locator(
                 "input[placeholder='Enter variant, gene or select an example above']"
             )
@@ -1222,11 +1424,15 @@ class BrowserReviewService:
             stage = "submitting the Franklin query"
             search.fill(query)
             search.press("Enter")
+            dismissed = dismiss_franklin_onboarding(page)
+            if dismissed and progress:
+                progress("Franklin: skipped optional first-use material dialog")
             stage = "resolving the Franklin variant route"
             self._open_franklin_resolved_variant(page, variant)
             stage = "waiting for the Franklin classification"
             for _ in range(60):
                 self._check_cancelled()
+                dismiss_franklin_onboarding(page)
                 last_text = page.locator("body").inner_text()
                 if (
                     self._franklin_result_ready(page, last_text)
@@ -1243,7 +1449,7 @@ class BrowserReviewService:
                 if evidence.status != "found":
                     return evidence
                 try:
-                    assessment = self._capture_franklin_assessment(
+                    assessment = self._capture_franklin_assessment_with_retry(
                         page, variant, artifact_directory
                     )
                     evidence.raw.setdefault("screenshots", []).extend(assessment)
@@ -1253,6 +1459,7 @@ class BrowserReviewService:
                         f"{exc}"
                     )
                     evidence.status = "partial_capture"
+                    evidence.raw["failure_stage"] = "assessment_capture"
                     evidence.summary = (
                         f"{evidence.summary} Franklin screenshots require retry."
                     ).strip()
@@ -1300,6 +1507,7 @@ class BrowserReviewService:
         )
 
 
+
     @staticmethod
     def _franklin_result_ready(page: Any, body_text: str) -> bool:
         if "Suggested classification" in body_text:
@@ -1312,6 +1520,8 @@ class BrowserReviewService:
 
     def _open_franklin_resolved_variant(self, page: Any, variant: VariantRecord) -> None:
         for _ in range(40):
+            self._check_cancelled()
+            dismiss_franklin_onboarding(page)
             if re.search(r"/clinical-db/variant/snp(?:Tumor)?/", page.url):
                 return
             options = page.locator(".option")
@@ -1365,6 +1575,7 @@ class BrowserReviewService:
             ),
             timeout=self.navigation_timeout_ms,
         )
+
 
     def _select_franklin_search_mode(self, page: Any) -> None:
         """Choose the explicitly requested GRCh37/hg19 somatic search mode."""
@@ -1547,12 +1758,12 @@ class BrowserReviewService:
         sync_browser, browser_error, browser_timeout = self._browser_api()
         recovered: dict[str, DatabaseEvidence] = {}
         report_captures: dict[str, Path | None] = {}
-        report_audits: dict[str, list[tuple[Path, DatabaseEvidence]]] = {}
+        report_pages: dict[str, tuple[str, list[dict[str, Any]], str]] = {}
+        report_audits: dict[str, list[tuple[Path, VariantRecord, DatabaseEvidence]]] = {}
         with sync_browser() as runtime:
-            context = runtime.chromium.launch_persistent_context(
-                str(self.profile_directory("MTBP")),
-                channel=self.channel,
-                headless=False,
+            context = self._launch_browser_context(
+                runtime,
+                "MTBP",
                 accept_downloads=True,
                 viewport={"width": 1440, "height": 1000},
                 background=self.browser_background,
@@ -1567,20 +1778,30 @@ class BrowserReviewService:
                 for variant, timed_out in pending:
                     self._check_cancelled()
                     analysis_id = str(timed_out.raw.get("analysis_id") or "")
-                    self._goto_with_retries(page, MTBP_REPORTS_URL, attempts=2)
-                    report_link = page.get_by_role(
-                        "link", name=analysis_id, exact=True
-                    )
-                    report_count = report_link.count()
                     if timed_out.status == "found":
                         if any(str(item.raw.get("analysis_id") or "") == analysis_id
                                and item.status != "found" for _, item in pending):
                             report_audits.setdefault(analysis_id, []).append((
                                 self._screenshot_path(artifact_directory, "MTBP", variant).with_suffix(".audit.json"),
+                                variant,
                                 timed_out,
                             ))
                             recovered[self.variant_key(variant)] = timed_out
                             continue
+                    if analysis_id in report_pages:
+                        report_count = 1
+                        report_link = None
+                    else:
+                        self._goto_with_retries(page, MTBP_REPORTS_URL, attempts=2)
+                        report_link = page.get_by_role(
+                            "link", name=analysis_id, exact=True
+                        )
+                        report_count = report_link.count()
+                    if timed_out.status == "found":
+                        audit_path = self._screenshot_path(
+                            artifact_directory, "MTBP", variant
+                        ).with_suffix(".audit.json")
+                        self._persist_mtbp_report_audit(audit_path, variant, timed_out)
                         if report_count == 0:
                             cleanup = {
                                 "status": "already_absent",
@@ -1600,12 +1821,7 @@ class BrowserReviewService:
                                 ),
                             }
                         timed_out.raw["remote_report_cleanup"] = cleanup
-                        self._write_audit(
-                            timed_out,
-                            self._screenshot_path(
-                                artifact_directory, "MTBP", variant
-                            ).with_suffix(".audit.json"),
-                        )
+                        self._persist_mtbp_report_audit(audit_path, variant, timed_out)
                         recovered[self.variant_key(variant)] = timed_out
                         continue
                     if report_count != 1:
@@ -1626,30 +1842,54 @@ class BrowserReviewService:
                                 }
                             recovered[self.variant_key(variant)] = timed_out
                         continue
-                    self._open_mtbp_report_link(page, report_link)
-                    page.wait_for_url(
-                        re.compile(r"https://mtbp\.org/patients/.+/report/\d+/?"),
-                        timeout=self.navigation_timeout_ms,
-                    )
-                    self._wait_for_mtbp_content(page)
-                    body_text = page.locator("body").inner_text(
-                        timeout=self.navigation_timeout_ms
-                    )
-                    version_tooltip = page.locator("[data-tooltip-html*='VEP:']")
-                    if version_tooltip.count():
-                        version_html = (
-                            version_tooltip.first.get_attribute("data-tooltip-html")
-                            or ""
+                    if analysis_id in report_pages:
+                        body_text, report_rows, report_url = report_pages[analysis_id]
+                        if page.url.rstrip("/") != report_url.rstrip("/"):
+                            self._goto_with_retries(page, report_url)
+                            self._wait_for_mtbp_content(page)
+                    else:
+                        if progress:
+                            matching_variants = sum(
+                                str(item.raw.get("analysis_id") or "") == analysis_id
+                                for _, item in pending
+                            )
+                            progress(
+                                f"MTBP: opening retained report {analysis_id} for "
+                                f"{matching_variants} variant(s)"
+                            )
+                        assert report_link is not None
+                        self._open_mtbp_report_link(page, report_link)
+                        page.wait_for_url(
+                            re.compile(r"https://mtbp\.org/patients/.+/report/\d+/?"),
+                            timeout=self.navigation_timeout_ms,
                         )
-                        body_text += "\n" + re.sub(
-                            r"<br\s*/?>", "\n", version_html, flags=re.IGNORECASE
+                        self._wait_for_mtbp_content(page)
+                        body_text = page.locator("body").inner_text(
+                            timeout=self.navigation_timeout_ms
+                        )
+                        version_tooltip = page.locator("[data-tooltip-html*='VEP:']")
+                        if version_tooltip.count():
+                            version_html = (
+                                version_tooltip.first.get_attribute("data-tooltip-html")
+                                or ""
+                            )
+                            body_text += "\n" + re.sub(
+                                r"<br\s*/?>", "\n", version_html, flags=re.IGNORECASE
+                            )
+                        report_rows = self._extract_mtbp_rows(page)
+                        report_url = page.url
+                        report_pages[analysis_id] = (
+                            body_text,
+                            report_rows,
+                            report_url,
                         )
                     evidence = parse_mtbp_report(
                         body_text,
-                        self._extract_mtbp_rows(page),
+                        report_rows,
                         [variant],
-                        page.url,
+                        report_url,
                         cancer_type=self.mtbp_cancer_type,
+                        complete_submission=False,
                     )[self.variant_key(variant)]
                     evidence.accession = timed_out.accession
                     screenshot_path = None
@@ -1704,11 +1944,15 @@ class BrowserReviewService:
                     )
                     report_audits.setdefault(analysis_id, []).append((
                         self._screenshot_path(artifact_directory, "MTBP", variant).with_suffix(".audit.json"),
+                        variant,
                         evidence,
                     ))
                     recovered[self.variant_key(variant)] = evidence
                     if progress:
-                        progress(f"MTBP: recovered late report ({analysis_id})")
+                        progress(
+                            f"MTBP: recovered variant {variant.hgvsc or variant.hgvsp} "
+                            f"from retained report ({analysis_id})"
+                        )
                 # A patient report is shared: never delete it after capturing
                 # just the first variant in a resumed batch.
                 for analysis_id, audit_records in report_audits.items():
@@ -1726,6 +1970,7 @@ class BrowserReviewService:
                 except browser_error:
                     pass
         return recovered
+
 
     def _search_mtbp_batch(
         self,
@@ -1777,19 +2022,11 @@ class BrowserReviewService:
         context = None
         try:
             with sync_browser() as runtime:
-                try:
-                    context = runtime.chromium.launch_persistent_context(
-                        str(self.profile_directory("MTBP")),
-                        channel=self.channel,
-                        headless=False,
-                        accept_downloads=True,
-                        viewport={"width": 1440, "height": 1000},
-                        background=self.browser_background,
-                    )
-                except Exception as exc:
-                    raise BrowserAutomationUnavailable(
-                        f"Could not start MTBP in Edge. Actual startup error: {exc}"
-                    ) from exc
+                context = self._launch_browser_context(
+                    runtime, "MTBP", accept_downloads=True,
+                    viewport={"width": 1440, "height": 1000},
+                    background=self.browser_background,
+                )
                 page = context.pages[0] if context.pages else context.new_page()
                 if progress:
                     progress(f"MTBP: submitting {len(submitted_queries)} pseudonymous variants")
@@ -2001,7 +2238,7 @@ class BrowserReviewService:
                         f"{accepted_fallbacks}/{len(fallback_keys)} variant(s)"
                     )
                 captured_at = datetime.now(timezone.utc).isoformat()
-                audit_records: list[tuple[Path, DatabaseEvidence]] = []
+                audit_records: list[tuple[Path, VariantRecord, DatabaseEvidence]] = []
                 for variant, query in active_pairs:
                     key = self.variant_key(variant)
                     evidence = parsed[key]
@@ -2054,7 +2291,7 @@ class BrowserReviewService:
                     audit_path = self._screenshot_path(
                         artifact_directory, "MTBP", variant
                     ).with_suffix(".audit.json")
-                    audit_records.append((audit_path, evidence))
+                    audit_records.append((audit_path, variant, evidence))
                     results[key] = evidence
                 remote_cleanup = self._finalize_mtbp_report(
                     page,
@@ -2216,7 +2453,10 @@ class BrowserReviewService:
         self._goto_with_retries(page, MTBP_REPORTS_URL)
         if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
             raise RuntimeError("MTBP report list is unavailable; cleanup was not confirmed.")
+        expected_count = self._mtbp_rendered_report_count(page)
         buttons = page.locator("button.delete-patient")
+        if expected_count != buttons.count():
+            raise RuntimeError("MTBP rendered report count and delete controls differ; cleanup was not confirmed.")
         identifiers = [str(buttons.nth(i).get_attribute("data-patient-name") or "")
                        for i in range(buttons.count())]
         if any(not name for name in identifiers) or len(set(identifiers)) != len(identifiers):
@@ -2232,29 +2472,47 @@ class BrowserReviewService:
             if progress:
                 progress(f"MTBP: removed portal report {len(deleted)}/{len(identifiers)}")
         remaining = page.locator("button.delete-patient").count()
-        if remaining >= MTBP_REPORT_LIMIT:
+        if remaining >= MTBP_REPORT_LIMIT or self._mtbp_rendered_report_count(page)!=0:
             raise RuntimeError("MTBP report list is not empty; no new analysis was submitted.")
         if progress:
             progress(f"MTBP: report list empty; removed {len(deleted)} report(s)")
         return {"status": "deleted_stale" if deleted else "empty",
                 "deleted_reports": deleted, "remaining_reports": remaining}
 
+    @staticmethod
+    def _mtbp_rendered_report_count(page: Any) -> int:
+        """Zero controls on a loading/error/login page are not an empty account."""
+        if page.url.rstrip('/')!=MTBP_REPORTS_URL.rstrip('/'):
+            raise RuntimeError('MTBP report list is unavailable; absence was not confirmed.')
+        body=page.locator('body').inner_text()
+        match=re.search(r'Currently,\s*(\d+)\s+Reports',body)
+        if not match or not all(header in body for header in ('Report ID','Entry Date','Cancer Type','Delete')):
+            raise RuntimeError('MTBP rendered report list is unavailable; absence was not confirmed.')
+        return int(match.group(1))
+
     def _finalize_mtbp_report(
         self,
         page: Any,
         analysis_id: str,
-        audit_records: list[tuple[Path, DatabaseEvidence]],
+        audit_records: list[tuple[Path, DatabaseEvidence] | tuple[Path, VariantRecord, DatabaseEvidence]],
     ) -> dict[str, str]:
         """Persist local evidence before removing one exact completed report."""
-        for audit_path, evidence in audit_records:
-            self._write_audit(evidence, audit_path)
+        def persist(record):
+            if len(record) == 3:
+                self._persist_mtbp_report_audit(*record)
+            else:
+                self._write_audit(record[1], record[0])
+
+        for record in audit_records:
+            persist(record)
         outcome = self._delete_mtbp_report(page, analysis_id)
-        for audit_path, evidence in audit_records:
+        for record in audit_records:
+            evidence = record[-1]
             evidence.raw["remote_report_cleanup"] = outcome
             if outcome.get("status") not in {"deleted", "already_absent"}:
                 evidence.status = "partial_capture"
                 evidence.summary += " MTBP portal cleanup failed; retry to remove the retained report."
-            self._write_audit(evidence, audit_path)
+            persist(record)
         return outcome
 
     def _delete_mtbp_report(self, page: Any, analysis_id: str) -> dict[str, str]:
@@ -2266,6 +2524,7 @@ class BrowserReviewService:
                 self._goto_with_retries(page, MTBP_REPORTS_URL)
             if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
                 return {"status": "failed", "message": "MTBP report list is unavailable."}
+            self._mtbp_rendered_report_count(page)
             report_link = page.get_by_role("link", name=analysis_id, exact=True)
             report_count = report_link.count()
             if report_count == 0:
@@ -2306,6 +2565,7 @@ class BrowserReviewService:
                 self._goto_with_retries(page, MTBP_REPORTS_URL, attempts=2)
                 if page.url.rstrip("/") != MTBP_REPORTS_URL.rstrip("/"):
                     return {"status": "failed", "message": "Report list became unavailable."}
+                self._mtbp_rendered_report_count(page)
                 if page.get_by_role("link", name=analysis_id, exact=True).count() == 0:
                     return {"status": "deleted",
                             "message": "MTBP report removed; server absence verified."}
@@ -2531,37 +2791,9 @@ class BrowserReviewService:
 
     @staticmethod
     def _extract_expanded_mtbp_rows(page: Any) -> list[dict[str, Any]]:
-        """Read only the visible alteration-centric report tables."""
-        return page.locator("table").evaluate_all(
-            """
-            tables => tables
-              .filter(table => !!(table.offsetWidth || table.offsetHeight || table.getClientRects().length))
-              .flatMap(table => {
-                const rows = [...table.rows];
-                if (!rows.length) return [];
-                const headers = [...rows[0].cells].map(cell => cell.innerText.trim());
-                if (headers[0] !== 'Gene' || headers[2] !== 'Alteration' ||
-                    !headers[4]?.startsWith('Reported biomarker')) return [];
-                const accordion = table.closest('.accordion-item');
-                const section = accordion?.firstElementChild?.innerText?.trim() || '';
-                return rows.slice(1).map(row => {
-                  const cells = [...row.cells];
-                  const geneText = cells[0]?.innerText.trim() || '';
-                  return {
-                    section,
-                    gene: (geneText.match(/[A-Za-z0-9-]+/) || [''])[0],
-                    gene_text: geneText,
-                    gene_info: cells[1]?.innerText.trim() || '',
-                    alteration: cells[2]?.innerText.trim() || '',
-                    identity_text: (cells[2]?.innerText || '') + '\\n' + (cells[2]?.textContent || ''),
-                    functional_evidence: cells[3]?.innerText.trim() || '',
-                    biomarkers: cells[4]?.innerText.trim() || '',
-                    source_links: [...row.querySelectorAll('a[href]')].map(a => a.href)
-                  };
-                });
-              })
-            """
-        )
+        """Read visible alteration tables and their exact linked identity details."""
+        return page.locator("table").evaluate_all(MTBP_TABLE_ROWS_JS)
+
 
     def _capture_result(
         self,
@@ -3171,21 +3403,35 @@ class BrowserReviewService:
         population_heading = page.get_by_role(
             "heading", name="Population Frequencies", exact=True
         )
+        clinical_heading = page.get_by_role(
+            "heading", name="Clinical evidence", exact=True
+        )
         prediction_heading.wait_for(
             state="visible", timeout=self.navigation_timeout_ms
         )
         population_heading.wait_for(
             state="visible", timeout=self.navigation_timeout_ms
         )
+        clinical_heading.wait_for(
+            state="visible", timeout=self.navigation_timeout_ms
+        )
+        verification = _franklin_identity(page.locator("body").inner_text(), page.url, variant)
+        if not verification.accepted:
+            raise ValueError(f"Franklin assessment identity mismatch: {verification.reason}")
         prediction_section = page.locator("div.section").filter(
             has=prediction_heading
         )
         population_section = page.locator("div.section").filter(
             has=population_heading
         )
-        if prediction_section.count() != 1 or population_section.count() != 1:
+        clinical_section = page.locator("div.section").filter(
+            has=clinical_heading
+        )
+        if any(section.count() != 1 for section in (
+            prediction_section, population_section, clinical_section,
+        )):
             raise ValueError(
-                "Franklin prediction/population evidence panels were ambiguous."
+                "Franklin prediction/population/clinical evidence panels were ambiguous."
             )
         base_path = self._screenshot_path(
             artifact_directory, "Franklin", variant
@@ -3199,83 +3445,118 @@ class BrowserReviewService:
                 population_section,
                 "population-frequencies",
             ),
+            ("Clinical evidence", clinical_heading, clinical_section, "clinical-evidence"),
         ):
+            if section is clinical_section:
+                toggle = section.locator(".frequency-details-toggle")
+                if toggle.count() > 1:
+                    raise ValueError("Franklin clinical evidence expansion was ambiguous.")
+                if toggle.count() == 1 and toggle.inner_text().strip() == "See all evidences":
+                    toggle.click()
             self._wait_for_franklin_section_stability(page, section)
-            heading.evaluate("el => el.scrollIntoView({block: 'start'})")
-            page.evaluate("window.scrollTo(0, Math.max(0, window.scrollY - 20))")
             screenshot_path = base_path.with_name(
                 f"{base_path.stem}-{suffix}{base_path.suffix}"
             )
-            heading_box = heading.bounding_box()
-            section_box = section.bounding_box()
-            if heading_box is None or section_box is None:
-                raise ValueError(f"Franklin {label} panel was not visible.")
-            dimensions = section.evaluate(
-                """
-                el => {
-                  const root = el.getBoundingClientRect();
-                  const descendants = [el, ...el.querySelectorAll('*')]
-                    .map(node => node.getBoundingClientRect())
-                    .filter(rect => rect.width > 0 && rect.height > 0);
-                  return {
-                    width: Math.max(
-                      el.scrollWidth,
-                      ...descendants.map(rect => rect.right - root.left)
-                    ),
-                    height: Math.max(
-                      el.scrollHeight,
-                      ...descendants.map(rect => rect.bottom - root.top)
-                    )
-                  };
-                }
-                """
-            )
-            left = min(float(heading_box["x"]), float(section_box["x"]))
-            top = min(float(heading_box["y"]), float(section_box["y"]))
-            right = max(
-                float(heading_box["x"] + heading_box["width"]),
-                float(section_box["x"])
-                + max(float(section_box["width"]), float(dimensions.get("width") or 0)),
-            )
-            bottom = max(
-                float(heading_box["y"] + heading_box["height"]),
-                float(section_box["y"])
-                + max(float(section_box["height"]), float(dimensions.get("height") or 0)),
-            )
-            clip_top = max(0, top - 64)
-            clip_left = max(0, left)
-            clip = {
-                "x": clip_left,
-                "y": clip_top,
-                "width": right - clip_left + 16,
-                "height": bottom - clip_top,
-            }
-            self._capture_with_incident_retry(
-                page,
-                screenshot_path,
-                lambda path=screenshot_path, area=clip: page.screenshot(
-                    path=str(path), clip=area
-                ),
-            )
+            # Assessment cards can grow past Franklin's internal scroll panel.
+            # Expose their full rendered height without changing source content.
+            selector = {
+                "predictions": "div.section#predictions",
+                "population-frequencies": "div.section#frequencies",
+                "clinical-evidence": "div.section#evidence",
+            }[suffix]
+            with expanded_capture_layout(page, selector):
+                self._capture_franklin_assessment_panel(
+                    page, label, heading, section, screenshot_path
+                )
             screenshots.append(
                 {"label": label, "path": str(screenshot_path), "url": assessment_url}
             )
         return screenshots
 
+    def _capture_franklin_assessment_panel(
+        self, page: Any, label: str, heading: Any, section: Any, screenshot_path: Path,
+    ) -> None:
+        heading.evaluate("el => el.scrollIntoView({block: 'start'})")
+        page.evaluate("window.scrollTo(0, Math.max(0, window.scrollY - 20))")
+        self._wait_for_franklin_section_stability(page, section)
+        heading_box = heading.bounding_box()
+        section_box = section.bounding_box()
+        if heading_box is None or section_box is None:
+            raise ValueError(f"Franklin {label} panel was not visible.")
+        dimensions = section.evaluate(
+            """
+            el => {
+              const root = el.getBoundingClientRect();
+              const descendants = [el, ...el.querySelectorAll('*')]
+                .map(node => node.getBoundingClientRect())
+                .filter(rect => rect.width > 0 && rect.height > 0);
+              return {
+                width: Math.max(
+                  el.scrollWidth,
+                  ...descendants.map(rect => rect.right - root.left)
+                ),
+                height: Math.max(
+                  el.scrollHeight,
+                  ...descendants.map(rect => rect.bottom - root.top)
+                )
+              };
+            }
+            """
+        )
+        left = min(float(heading_box["x"]), float(section_box["x"]))
+        top = min(float(heading_box["y"]), float(section_box["y"]))
+        right = max(
+            float(heading_box["x"] + heading_box["width"]),
+            float(section_box["x"])
+            + max(float(section_box["width"]), float(dimensions.get("width") or 0)),
+        )
+        bottom = max(
+            float(heading_box["y"] + heading_box["height"]),
+            float(section_box["y"])
+            + max(float(section_box["height"]), float(dimensions.get("height") or 0)),
+        )
+        clip_top = max(0, top - 64)
+        clip_left = max(0, left)
+        clip = {
+            "x": clip_left,
+            "y": clip_top,
+            "width": right - clip_left + 16,
+            "height": bottom - clip_top,
+        }
+        self._capture_with_incident_retry(
+            page,
+            screenshot_path,
+            lambda: page.screenshot(path=str(screenshot_path), clip=clip),
+        )
+
     def _wait_for_franklin_section_stability(self, page: Any, section: Any) -> None:
         """Wait until a dynamic Franklin assessment panel stops changing."""
-        previous: tuple[int, int] | None = None
+        previous: tuple[int, int, int] | None = None
         stable_reads = 0
-        for _ in range(8):
+        for _ in range(max(3, self.navigation_timeout_ms // 500)):
             self._check_cancelled()
             state = section.evaluate(
-                "el => ({height: el.scrollHeight, textLength: el.innerText.trim().length})"
+                """el => ({
+                    height: el.scrollHeight,
+                    textLength: el.innerText.trim().length,
+                    top: el.getBoundingClientRect().top + window.scrollY,
+                    loading: [...el.querySelectorAll(
+                        'gnx-loading-animation, mat-progress-spinner, [aria-busy="true"]'
+                    )].some(node => {
+                        const box = node.getBoundingClientRect();
+                        const style = getComputedStyle(node);
+                        return box.width > 0 && box.height > 0
+                            && style.display !== 'none' && style.visibility !== 'hidden';
+                    })
+                })"""
             )
             current = (
                 int(state.get("height") or 0),
                 int(state.get("textLength") or 0),
+                round(float(state.get("top") or 0)),
             )
-            if current == previous and current[0] > 0 and current[1] > 0:
+            if (current == previous and current[0] > 0 and current[1] > 0
+                    and not state.get("loading")):
                 stable_reads += 1
                 if stable_reads >= 2:
                     return
@@ -3283,6 +3564,7 @@ class BrowserReviewService:
                 stable_reads = 0
             previous = current
             page.wait_for_timeout(500)
+        raise TimeoutError("Franklin assessment panel did not finish rendering.")
 
     def _capture_mtbp_variant_screenshot(
         self,
@@ -3296,6 +3578,20 @@ class BrowserReviewService:
         last_error: Exception | None = None
         for attempt in range(2):
             try:
+                shared = [
+                    entry for entry in self._extract_mtbp_rows(page)
+                    if entry.get("capture_geometry", {}).get("shared_gene_context")
+                    and _mtbp_screenshot_row_matches(
+                        str(entry.get("gene", "")) + " " + _mtbp_row_identity_text(entry), variant,
+                    )
+                ]
+                if len(shared) == 1:
+                    # A physical tr may omit its inherited gene label. Freeze the
+                    # full visible context and mark the crop as gene context.
+                    context_path = self._capture_mtbp_full_report(
+                        page, artifact_directory, screenshot_path.stem + "-shared-gene",
+                    )
+                    return self._crop_mtbp_variant_from_report(page, variant, artifact_directory, context_path)
                 row, target = self._locate_mtbp_screenshot_target(page, variant)
                 target.scroll_into_view_if_needed()
                 page.wait_for_timeout(250)
@@ -3323,6 +3619,7 @@ class BrowserReviewService:
             )
         )
 
+
     def _crop_mtbp_variant_from_report(
         self, page: Any, variant: VariantRecord, artifact_directory: Path,
         full_report_path: Path,
@@ -3334,8 +3631,8 @@ class BrowserReviewService:
                          if variant.symbol and _mtbp_gene_symbol(entry["gene"]).casefold() == variant.symbol.casefold()]
             matches = [entry for entry in gene_rows
                        if _mtbp_screenshot_row_matches(entry["gene"] + " " + entry["identity"], variant)]
-            gene_context = len(matches) != 1
-            selected = gene_rows if gene_context else matches
+            selected = matches if len(matches) == 1 else gene_rows
+            gene_context = len(matches) != 1 or any(entry.get("shared_gene_context") for entry in selected)
             if not selected:
                 raise ValueError("MTBP capture has no rows for this gene")
             caption = f"{variant.symbol}: gene context - variant identity uncertain; all rows for this gene are shown."
@@ -3404,20 +3701,8 @@ class BrowserReviewService:
             # Freeze geometry with the capture, so later scrolling/accordion
             # changes cannot assign another variant's pixels to this variant.
             geometry = page.evaluate("""() => {
-                const rect = node => {const r=node.getBoundingClientRect();
-                    return {x:r.x+scrollX,y:r.y+scrollY,width:r.width,height:r.height};};
-                const rows = [...document.querySelectorAll('table')].flatMap(table => {
-                    const header=table.rows[0];
-                    if (!header || header.cells[0]?.innerText.trim() !== 'Gene'
-                        || header.cells[2]?.innerText.trim() !== 'Alteration') return [];
-                    const section = table.closest('.accordion-item')?.firstElementChild;
-                    return [...table.rows].slice(1).filter(row => row.getBoundingClientRect().height > 0)
-                        .map(row => ({gene:row.cells[0]?.innerText || '',
-                        identity:(row.cells[2]?.innerText || '') + '\\n' + (row.cells[2]?.textContent || ''),
-                            section:section && !section.contains(table) && section.getBoundingClientRect().height > 0
-                                ? rect(section) : null,
-                            header:rect(header), row:rect(row)}));
-                });
+                const rows = (TABLE_ROWS)([...document.querySelectorAll('table')])
+                    .map(entry => entry.capture_geometry);
                 const genomics = [...document.querySelectorAll('h1,h2,h3,h4,h5,h6')]
                     .find(node => node.innerText.trim() === 'Genomics'
                         && node.getBoundingClientRect().height > 0);
@@ -3427,9 +3712,9 @@ class BrowserReviewService:
                     : 0;
                 return {width:document.documentElement.scrollWidth,
                     height:document.documentElement.scrollHeight,
-                    content_top: genomics ? rect(genomics).y : fallbackTop,
+                    content_top: genomics ? genomics.getBoundingClientRect().y + scrollY : fallbackTop,
                     rows};
-            }""")
+            }""".replace("TABLE_ROWS", MTBP_TABLE_ROWS_JS))
             page.screenshot(path=str(screenshot_path), full_page=True)
             screenshot_path.with_suffix(".geometry.json").write_text(
                 json.dumps(geometry), encoding="utf-8"
@@ -3439,21 +3724,17 @@ class BrowserReviewService:
             self._capture_with_incident_retry(page, screenshot_path, capture)
         return screenshot_path
 
+
     def _locate_mtbp_screenshot_target(
         self, page: Any, variant: VariantRecord
     ) -> tuple[Any, Any]:
         rows = page.locator("table tr")
-        row_texts = rows.all_inner_texts()
-        alteration_texts: list[str] = []
-        for index, text in enumerate(row_texts):
-            cells = rows.nth(index).locator("td")
-            alteration_texts.append(
-                cells.nth(0).inner_text() + " " + cells.nth(2).inner_text() if cells.count() > 2 else text
-            )
+        report_rows = self._extract_mtbp_rows(page)
         matches = [
-            index
-            for index, text in enumerate(alteration_texts)
-            if _mtbp_screenshot_row_matches(text, variant)
+            entry["row_index"] for entry in report_rows
+            if _mtbp_screenshot_row_matches(
+                str(entry.get("gene", "")) + " " + _mtbp_row_identity_text(entry), variant
+            )
         ]
         visible_matches = [
             index for index in matches if rows.nth(index).is_visible()
@@ -3475,6 +3756,7 @@ class BrowserReviewService:
                 toggle.first.click()
         row.wait_for(state="visible", timeout=self.navigation_timeout_ms)
         return row, row
+
 
     @staticmethod
     def _screenshot_label(database: str) -> str:
@@ -3574,23 +3856,52 @@ class BrowserReviewService:
         return "login" in lowered or "signin" in lowered
 
     def _session_authenticated(self, database: str, page: Any) -> bool:
-        if database == "COSMIC":
-            return (
-                not self._login_required(database, page.url)
-                and page.get_by_role("link", name="log out", exact=False).count() >= 1
-            )
-        if database == "Franklin":
-            return not self._login_required(database, page.url) and page.locator("#email").count() == 0
+        current = urlsplit(page.url)
+        expected = urlsplit(self.login_url(database))
+        if current.scheme != 'https' or current.hostname != expected.hostname:
+            self.authenticated_sources.discard(database)
+            return False
+        if self._login_required(database, page.url):
+            self.authenticated_sources.discard(database)
+            return False
         if database == "ClinVar":
             return True
-        if database == "MTBP":
-            return (
-                not self._login_required(database, page.url)
-                and page.locator("#variant-input").count() == 1
-            )
-        return not self._login_required(database, page.url)
+        # A public landing page, blank tab or browser Back is not evidence of a
+        # login. Use positive controls from the authenticated application.
+        snapshot = page.evaluate("""() => ({
+            logout: [...document.querySelectorAll('a, button, [role="menuitem"]')]
+                .some(el => /^(?:log\\s*out|sign\\s*out)$/i.test((el.innerText || el.textContent || '').trim())
+                    || /(?:logout|signout)/i.test(el.getAttribute('href') || '')),
+            franklinSearch: !!document.querySelector("input[placeholder='Enter variant, gene or select an example above']"),
+            franklinUser: !!document.querySelector('.user-name'),
+            oncokbAccount: !!document.querySelector('#account-menu'),
+            mtbpInput: !!document.querySelector('#variant-input')
+        })""", timeout_ms=2_000) or {}
+        if database == "COSMIC":
+            verified = bool(snapshot.get('logout'))
+        elif database == "Franklin":
+            verified = bool(snapshot.get('logout') or (
+                current.path.startswith('/clinical-db/') and (snapshot.get('franklinSearch') or snapshot.get('franklinUser'))))
+        elif database == "MTBP":
+            verified = bool(snapshot.get('mtbpInput'))
+        elif database == "OncoKB":
+            # OncoKB renders this menu only when isUserAuthenticated is true;
+            # its Sign Out entry is mounted only after the menu is opened.
+            verified = bool(snapshot.get('logout') or snapshot.get('oncokbAccount'))
+        else:verified = False
+        if verified:self.authenticated_sources.add(database)
+        else:self.authenticated_sources.discard(database)
+        return verified
+
+    def _login_rejected(self, page: Any) -> bool:
+        return bool(page.evaluate("""() => {
+            const text = document.body?.innerText || '';
+            return /(?:invalid|incorrect|wrong)\\s+(?:username|email|password|credentials)|authentication failed|invalid user credentials/i.test(text);
+        }""", timeout_ms=2_000))
 
     def _try_saved_login(self, database: str, page: Any) -> bool:
+        self.login_credentials_verified = False
+        self._check_cancelled()
         if self._session_authenticated(database, page):
             return True
         if database == "Franklin" and self._wait_for_franklin_auth_or_form(page):
@@ -3618,6 +3929,7 @@ class BrowserReviewService:
         if not email or not password:
             return False
         try:
+            self._check_cancelled()
             if database == "COSMIC":
                 essential_cookies = page.get_by_role(
                     "button", name="Accept essential", exact=True
@@ -3640,20 +3952,25 @@ class BrowserReviewService:
                 page.locator(submit_selector).filter(has_text=re.compile(r"^SIGN IN$", re.I)).click()
             else:
                 page.locator(submit_selector).click()
-            page.wait_for_url(
-                lambda url: not self._login_required(database, url),
-                timeout=60_000,
-            )
-            if database == "MTBP" and "/analyse" not in page.url:
-                self._goto_with_retries(page, self.login_url("MTBP"))
-            page.wait_for_timeout(750)
-            return self._session_authenticated(database, page)
+            deadline = time.monotonic() + min(15_000, self.navigation_timeout_ms) / 1_000
+            while time.monotonic() < deadline:
+                self._check_cancelled()
+                if database == "MTBP" and not self._login_required(database, page.url) and "/analyse" not in page.url:
+                    self._goto_with_retries(page, self.login_url("MTBP"))
+                if self._session_authenticated(database, page):
+                    self.login_credentials_verified = True
+                    return True
+                if self._login_rejected(page):return False
+                self._interruptible_page_wait(page, 250)
+            return False
         except Exception:
-            # SPA navigation can detach the sign-in button after the server has
-            # already accepted the login. Trust the resulting authenticated URL
-            # instead of reporting a false login failure and skipping all queries.
+            # SPA navigation can detach the form because an existing cookie
+            # already authenticated the page. Keep that valid session, but never
+            # treat an interrupted submission as proof of the entered password.
             try:
-                return self._session_authenticated(database, page)
+                self._check_cancelled()
+                accepted = self._session_authenticated(database, page)
+                return accepted
             except Exception:
                 return False
 
@@ -3664,6 +3981,7 @@ class BrowserReviewService:
             min(5_000, self.navigation_timeout_ms) // 250,
         )
         for _ in range(attempts):
+            self._check_cancelled()
             if self._session_authenticated("Franklin", page):
                 return True
             if (
@@ -3671,7 +3989,7 @@ class BrowserReviewService:
                 and page.locator("#password").count() == 1
             ):
                 return False
-            page.wait_for_timeout(250)
+            self._interruptible_page_wait(page, 250)
         return self._session_authenticated("Franklin", page)
 
     def _wait_for_oncokb_result(self, page: Any) -> None:
@@ -3681,19 +3999,35 @@ class BrowserReviewService:
             if self._login_required("OncoKB", page.url):
                 return
             body_text = page.locator("body").inner_text()
-            if "Variant Overview" in body_text and "Mutation Effect" in body_text:
-                return
             lowered = body_text.casefold()
+            if re.search(
+                r"\b(?:please|must|need to)\s+(?:log in|login|sign in)\s+"
+                r"(?:to\s+)?(?:view|access|continue)", lowered,
+            ):
+                raise ProviderLookupError(
+                    ProviderFailureKind.LOGIN_REQUIRED,
+                    "OncoKB requires sign-in to view this result; refresh the session before retrying.",
+                    diagnostics={"failure_stage": "session_required"},
+                )
+            diagnostics: dict[str, object] = {
+                "page_type": "variant",
+                "variant_overview": "variant overview" in lowered,
+                "mutation_effect": "mutation effect" in lowered,
+            }
+            if diagnostics["variant_overview"] and diagnostics["mutation_effect"]:
+                return
             if (
                 "page not found" in lowered
                 or "an error has occurred" in lowered
                 or "we do not have any information for this gene" in lowered
+                or "we do not have any information for this variant" in lowered
                 or "reference amino acid at position" in lowered
                 or re.search(r"\binvalid\s+somatic\b", body_text, re.IGNORECASE)
             ):
                 return
-            page.wait_for_timeout(500)
-        raise TimeoutError("OncoKB did not finish rendering the variant result.")
+            self._interruptible_page_wait(page, 500)
+        raise _OncoKBRenderingTimeout(diagnostics)
+
 
     def _browser_api(self):
         try:
@@ -3732,6 +4066,11 @@ class BrowserReviewService:
         )
         try:
             self._wait_for_oncokb_result(page)
+        except ProviderLookupError as exc:
+            return DatabaseEvidence(
+                "OncoKB", exc.kind.value, str(exc), accession=_review_query(variant),
+                url=page.url, raw={"failure_kind": exc.kind.value, **exc.diagnostics},
+            )
         except TimeoutError as exc:
             artifact_directory.mkdir(parents=True, exist_ok=True)
             base_path = self._screenshot_path(artifact_directory, "OncoKB", variant)
@@ -3758,12 +4097,14 @@ class BrowserReviewService:
                 raw={
                     "failure_kind": ProviderFailureKind.TRANSIENT.value,
                     "failure_stage": "result_rendering",
+                    **getattr(exc, "diagnostics", {}),
                     "visible_text_preview": visible_text,
                     "diagnostic_screenshot": str(diagnostic_path),
                     "diagnostic_capture_error": capture_error,
                 },
             )
         return self._capture_result("OncoKB", variant, page, artifact_directory)
+
 
     def _capture_mtbp_variant_with_fallback(
         self,
@@ -3815,6 +4156,15 @@ class BrowserReviewService:
             )
             if last_result.status == "found":
                 return last_result
+            # A stalled protein-route result may still resolve through the exact
+            # genomic route. Never use alternative queries to bypass a login.
+            if (
+                last_result.status == "error"
+                and failure_kind == ProviderFailureKind.TRANSIENT.value
+                and last_result.raw.get("failure_stage") == "result_rendering"
+                and "/gene/" in query_url
+            ):
+                continue
             if (
                 last_result.status not in {"not_found", "identity_mismatch"}
                 and failure_kind != ProviderFailureKind.IDENTITY_MISMATCH.value
@@ -3834,6 +4184,7 @@ class BrowserReviewService:
                 },
             )
         return last_result
+
 
     def _report_provider_results(
         self,
@@ -3866,8 +4217,32 @@ class BrowserReviewService:
             failure_stage = str(evidence.raw.get("failure_stage") or "").strip()
             if failure_stage:
                 fields.append(f"stage={_log_field(failure_stage)}")
+            diagnostics = evidence.raw.get("render_diagnostics")
+            if isinstance(diagnostics, dict):
+                attempts = evidence.raw.get("query_attempts", [])
+                fields.append(f"attempts={len(attempts) if isinstance(attempts, list) else 0}")
+                page_type = diagnostics.get("page_type")
+                if page_type in {"record", "search", "variant"}:
+                    fields.append(f"page_type={page_type}")
+                for name in (
+                    "record_metadata", "hgvs_title", "genomic_location",
+                    "variant_overview", "mutation_effect",
+                ):
+                    if name in diagnostics:
+                        fields.append(f"{name}={'yes' if diagnostics[name] else 'no'}")
+                if "result_links" in diagnostics:
+                    fields.append(f"result_links={int(diagnostics['result_links'] or 0)}")
             if evidence.summary:
                 fields.append(f"reason={_log_field(evidence.summary, maximum=240)}")
+            if database == "MTBP" and evidence.status != "found":
+                for field, label_name in (
+                    ("report_row_count", "report_rows"),
+                    ("gene_candidate_count", "gene_rows"),
+                    ("candidate_count", "matching_rows"),
+                    ("match_basis", "match_basis"),
+                ):
+                    if field in evidence.raw:
+                        fields.append(f"{label_name}={_log_field(str(evidence.raw[field]))}")
             progress(" | ".join(fields))
 
         count_fields = [
@@ -3886,6 +4261,7 @@ class BrowserReviewService:
                 ]
             )
         )
+
 
     def _publish_variant_result(
         self, variant: VariantRecord, evidence: DatabaseEvidence
@@ -4046,6 +4422,12 @@ def parse_oncokb_page(
             url=url,
             raw={"failure_kind": ProviderFailureKind.NOT_FOUND.value},
         )
+    if "we do not have any information for this variant" in body_text.casefold():
+        return DatabaseEvidence(
+            "OncoKB", "not_found", "OncoKB explicitly reported no information for this variant.",
+            accession=page_identity, url=url,
+            raw={"failure_kind": ProviderFailureKind.NOT_FOUND.value},
+        )
     if not oncogenicity and "Variant Overview" not in body_text:
         return DatabaseEvidence(
             "OncoKB", "not_found", f"No OncoKB web result for {page_identity}.",
@@ -4075,6 +4457,7 @@ def parse_oncokb_page(
         url=url,
         raw={"oncogenicity": oncogenicity, "biological_effect": biological_effect},
     )
+
 
 
 def parse_franklin_page(
@@ -4129,14 +4512,43 @@ def parse_mtbp_report(
     url: str,
     *,
     cancer_type: str,
+    complete_submission: bool = True,
 ) -> dict[str, DatabaseEvidence]:
     """Map the MTBP alteration-centric table to submitted variants.
 
     Matching is deliberately strict. A gene-only match is accepted only when
-    the report contains one row for that gene and MTBP displays no variant
-    identity for it; ambiguous rows and identity mismatches fail closed.
+    the complete submission contains one distinct variant for that gene and
+    MTBP displays one row without variant identity. Retained reports may have
+    incomplete submission context and cannot use this fallback.
     """
-    metadata = _mtbp_report_metadata(body_text, cancer_type)
+    variants = list(variants)
+    submitted_by_gene: dict[str, set[tuple[str, ...]]] = {}
+    for variant in variants:
+        submitted_by_gene.setdefault(variant.symbol.casefold(), set()).add((
+            variant.sample, variant.hgvsc, variant.hgvsp, variant.transcript,
+            variant.genomic_location, variant.ref_allele, variant.alt_allele,
+        ))
+    metadata = {
+        **_mtbp_report_metadata(body_text, cancer_type),
+        "report_row_count": len(report_rows),
+        "identity_matching_version": MTBP_MATCHING_REVISION,
+    }
+    if not report_rows and re.search(
+        r"(?:Putative functionally (?:relevant|neutral) variants|"
+        r"Variants of unknown/contradictory functional significance):\s*[1-9]\d*",
+        body_text, re.I,
+    ):
+        return {
+            BrowserReviewService.variant_key(variant): DatabaseEvidence(
+                "MTBP", "layout_changed",
+                "MTBP reported variants but no alteration table rows could be read; "
+                "this is a report extraction error, not confirmed absence.",
+                accession=_mtbp_variant_query(variant), url=url,
+                raw={**metadata, "failure_stage": "report_row_extraction",
+                    "failure_kind": ProviderFailureKind.LAYOUT_CHANGED.value},
+            )
+            for variant in variants
+        }
     results: dict[str, DatabaseEvidence] = {}
     for variant in variants:
         key = BrowserReviewService.variant_key(variant)
@@ -4145,37 +4557,40 @@ def parse_mtbp_report(
             if _mtbp_gene_symbol(str(row.get("gene", ""))).casefold()
             == variant.symbol.casefold()
         ]
-        candidates = list(gene_candidates)
-        match_basis = "gene"
         expected_protein = _mtbp_normalized_protein(_protein_change(variant.hgvsp))
         expected_cdna = _cdna_change(variant.hgvsc).casefold()
-        if expected_protein:
-            protein_matches = [
-                row for row in candidates
-                if expected_protein in _mtbp_proteins(str(row.get("identity_text", "")))
-                or expected_protein in _mtbp_proteins(str(row.get("alteration", "")))
-            ]
-            candidates = protein_matches
-            match_basis = "protein"
-        elif expected_cdna:
-            cdna_matches = [
-                row for row in candidates
-                if expected_cdna in re.sub(r"\s+", "", str(row.get("identity_text", ""))).casefold()
-            ]
-            if cdna_matches:
-                candidates = cdna_matches
-                match_basis = "cdna"
-            elif len(gene_candidates) == 1 and not _mtbp_row_has_variant_identity(
-                gene_candidates[0]
-            ):
-                candidates = gene_candidates
-                match_basis = "unique_gene_without_reported_identity"
-            else:
-                candidates = []
+        submitted_count = len(submitted_by_gene[variant.symbol.casefold()])
+        if not (expected_protein or expected_cdna or _mtbp_genomic_query(variant)):
+            results[key] = DatabaseEvidence(
+                "MTBP", "invalid_query", "No submitted variant identity is available for MTBP matching.",
+                url=url, raw={**metadata, "submitted_gene_variant_count": submitted_count},
+            )
+            continue
+        matching_rows = [
+            (row, basis) for row in gene_candidates
+            if (basis := _mtbp_identity_match_basis(_mtbp_row_identity_text(row), variant))
+        ]
+        candidates = [row for row, _ in matching_rows]
+        match_basis = (
+            matching_rows[0][1] if matching_rows else
+            "protein" if expected_protein else "cdna" if expected_cdna else "genomic_grch37"
+        )
+        unidentified_rows = [row for row in gene_candidates if not _mtbp_row_has_variant_identity(row)]
+        if (
+            not candidates and not expected_protein and expected_cdna
+            and len(gene_candidates) == 1 and unidentified_rows
+            and complete_submission and submitted_count == 1
+        ):
+            candidates = unidentified_rows
+            match_basis = "unique_gene_without_reported_identity"
 
         if len(candidates) != 1:
-            status = "not_found" if not candidates else "ambiguous_result"
-            detail = "no matching row" if not candidates else f"{len(candidates)} possible rows"
+            unresolved = bool(candidates or unidentified_rows)
+            status = "manual_review" if unresolved else "not_found"
+            detail = (
+                f"{len(candidates)} possible rows" if candidates else
+                "gene rows without enough variant identity" if unidentified_rows else "no matching row"
+            )
             results[key] = DatabaseEvidence(
                 "MTBP",
                 status,
@@ -4186,6 +4601,8 @@ def parse_mtbp_report(
                     **metadata,
                     "candidate_count": len(candidates),
                     "gene_candidate_count": len(gene_candidates),
+                    "submitted_gene_variant_count": submitted_count,
+                    "complete_submission": complete_submission,
                     "match_basis": match_basis,
                 },
             )
@@ -4242,10 +4659,12 @@ def parse_mtbp_report(
                 "actionability_tiers": actionability_tiers,
                 "biomarkers": biomarkers,
                 "source_links": list(dict.fromkeys(row.get("source_links", []))),
+                "submitted_gene_variant_count": submitted_count,
                 "match_basis": match_basis,
             },
         )
     return results
+
 
 
 def _mtbp_report_metadata(body_text: str, cancer_type: str) -> dict[str, Any]:
@@ -4539,11 +4958,17 @@ def _mtbp_retry_query(
 
 def _mtbp_normalized_protein(value: str) -> str:
     clean = (value or "").replace("p.", "").replace("(", "").replace(")", "").strip()
-    amino_acids = {**_AMINO_ACID_3_TO_1, "Ter": "*"}
-    # Convert each residue, including both ends of an indel range and inserted
-    # residues. Coordinates and operation (del, dup, delins, fs) stay unchanged.
-    clean = re.sub("|".join(amino_acids), lambda match: amino_acids[match.group()], clean)
+    if clean in {"", "?", "=", "-", "."}:
+        return ""
+    # Normalize all amino-acid tokens, including ranges and frameshifts, not
+    # only simple substitutions. Keep positions and stop distances intact.
+    clean = re.sub(
+        r"(?:" + "|".join(_AMINO_ACID_3_TO_1) + r"|Ter)",
+        lambda match: "*" if match.group(0) == "Ter" else _AMINO_ACID_3_TO_1[match.group(0)],
+        clean,
+    )
     return clean.casefold()
+
 
 
 def _mtbp_gene_symbol(value: str) -> str:
@@ -4552,34 +4977,119 @@ def _mtbp_gene_symbol(value: str) -> str:
 
 
 def _mtbp_row_has_variant_identity(row: dict[str, Any]) -> bool:
-    text = " ".join(
-        str(row.get(field, "")) for field in ("identity_text", "alteration")
-    )
+    text = _mtbp_row_identity_text(row)
     if _mtbp_proteins(text):
         return True
     return bool(re.search(r"\b[cnrmg]\.\s*[-+*0-9]", text, flags=re.IGNORECASE))
 
 
+
 def _mtbp_proteins(text: str) -> set[str]:
-    tokens = re.findall(r"p\.\(?([A-Za-z0-9_*?]+)\)?", text or "")
-    return {_mtbp_normalized_protein(token) for token in tokens}
+    tokens = re.findall(r"p\.\(?([A-Za-z0-9_*?=]+)\)?", text or "")
+    return {protein for token in tokens if (protein := _mtbp_normalized_protein(token))}
+
 
 
 def _mtbp_screenshot_row_matches(text: str, variant: VariantRecord) -> bool:
-    compact = re.sub(r"\s+", "", text or "").casefold()
-    if not variant.symbol or variant.symbol.casefold() not in compact:
+    if not variant.symbol or not re.search(
+        r"(?<![A-Za-z0-9_-])" + re.escape(variant.symbol) + r"(?![A-Za-z0-9_-])",
+        text or "", re.I,
+    ):
         return False
-    # MTBP may describe cDNA against another transcript. Prefer the displayed
-    # protein identity, consistently with parse_mtbp_report, before cDNA fallback.
+    return bool(_mtbp_identity_match_basis(text, variant))
+
+
+
+def _mtbp_row_identity_text(row: dict[str, Any]) -> str:
+    return " ".join(str(row.get(field, "")) for field in ("identity_text", "alteration"))
+
+
+
+def _mtbp_row_genomic_matches(text: str, variant: VariantRecord) -> bool:
+    return _mtbp_row_genomic_state(text, variant) is True
+
+
+
+def _mtbp_row_genomic_state(text: str, variant: VariantRecord) -> bool | None:
+    """True for exact GRCh37, False for explicit conflict, None if unreported."""
+    reported = [
+        (f"chr{'M' if chromosome.upper() == 'MT' else chromosome.upper()}:{change}".casefold(), assembly.casefold())
+        for chromosome, change, assembly in re.findall(
+            r"(?<![A-Za-z0-9_])(?:chr)?(\d{1,2}|X|Y|MT|M):\s*"
+            r"(g\.[^\s();,]+)\s*\((GRCh3[78])\)", text or "", re.I,
+        )
+    ]
+    if not reported:
+        return None
+    expected = _mtbp_genomic_query(variant)
+    if not expected:
+        return False
+    grch37 = [change for change, assembly in reported if assembly == "grch37"]
+    return bool(grch37) and all(change == expected.casefold() for change in grch37)
+
+
+
+def _mtbp_row_cdna_matches(
+    text: str, variant: VariantRecord, *, require_transcript: bool = False,
+) -> bool:
+    expected = _cdna_change(variant.hgvsc)
+    if not _contains_hgvs_change(text, expected):
+        return False
+    transcript_pattern = r"(?:(?:NM|NR|XM|XR)_\d+|ENST\d+)(?:\.\d+)?"
+    qualified_input = re.match(r"(" + transcript_pattern + r")\s*:", variant.hgvsc, re.I)
+    accession = qualified_input.group(1) if qualified_input else variant.transcript
+    transcript = (accession or "").split(".", 1)[0].casefold()
+    qualified = re.findall(
+        r"\b(" + transcript_pattern + r")(?:\s*\([^)]+\))?\s*:\s*"
+        r"([cn]\.[^\s();,]+)", text or "", re.I,
+    )
+    if qualified:
+        if not re.fullmatch(transcript_pattern, accession or "", re.I):
+            return False
+        return any(
+            accession.split(".", 1)[0].casefold() == transcript
+            and _contains_hgvs_change(change, expected)
+            for accession, change in qualified
+        )
+    return not require_transcript
+
+
+
+def _mtbp_identity_match_basis(text: str, variant: VariantRecord) -> str:
+    """Use the same conservative identity rules for evidence and its capture."""
+    genomic_state = _mtbp_row_genomic_state(text, variant)
+    if genomic_state is False:
+        return ""
+    # A reported protein conflict must not be overridden by DNA fallback. When
+    # the report omits protein, qualified cDNA or exact GRCh37 remains usable.
     expected_protein = _mtbp_normalized_protein(_protein_change(variant.hgvsp))
     reported_proteins = _mtbp_proteins(text)
     if expected_protein and reported_proteins:
-        return expected_protein in reported_proteins
-    expected_cdna = _cdna_change(variant.hgvsc).casefold()
-    cdna_tokens = re.findall(r"c\.[-+*0-9a-z_>]+", (text or "").casefold())
-    if cdna_tokens and expected_cdna:
-        return expected_cdna in cdna_tokens
-    return False
+        return "protein" if expected_protein in reported_proteins else ""
+    if _mtbp_row_cdna_matches(text, variant, require_transcript=bool(expected_protein)):
+        return "cdna"
+    return "genomic_grch37" if genomic_state is True else ""
+
+
+
+def _clinvar_locations(body_text: str) -> list[tuple[str, int, int, str]]:
+    """Parse complete assembly-labelled coordinates, including VCF spans."""
+    locations = []
+    for match in re.finditer(
+        r"\b(?:chr)?(\d{1,2}|X|Y|M|MT):\s*(\d+(?:,\d{3})*)"
+        r"(?:\s*[-\u2013\u2014]\s*(\d+(?:,\d{3})*))?\s*\((GRCh3[78])\)",
+        body_text, re.I,
+    ):
+        chromosome, start, end, assembly = match.groups()
+        start_position = int(start.replace(",", ""))
+        end_position = int((end or start).replace(",", ""))
+        if 0 < start_position <= end_position:
+            locations.append((
+                "M" if chromosome.upper() == "MT" else chromosome.upper(),
+                start_position, end_position, assembly.casefold(),
+            ))
+    return locations
+
 
 
 def _review_query(variant: VariantRecord) -> str:
@@ -4648,7 +5158,9 @@ def _oncokb_page_matches_variant(
 
 def _oncokb_query_urls(variant: VariantRecord) -> list[str]:
     candidates: list[str] = []
-    alteration = _protein_change(variant.hgvsp) or _cdna_change(variant.hgvsc)
+    protein = _protein_change(variant.hgvsp)
+    usable_protein = protein if protein not in {"", "?", "=", "-", "."} else ""
+    alteration = usable_protein or _cdna_change(variant.hgvsc)
     if variant.symbol and alteration:
         candidates.append(
             "https://www.oncokb.org/gene/"
@@ -4664,7 +5176,10 @@ def _oncokb_query_urls(variant: VariantRecord) -> list[str]:
             "https://www.oncokb.org/hgvsg/"
             f"{quote(genomic_hgvs, safe=':.')}?refGenome=GRCh37"
         )
+    if not usable_protein:
+        candidates.sort(key=lambda url: "/hgvsg/" not in url)
     return list(dict.fromkeys(candidates))
+
 
 
 def _transient_browser_failure(exc: Exception) -> bool:

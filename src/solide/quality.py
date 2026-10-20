@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 import re
 from .models import Variant
+from .annotations import annotation_group,needs_annotation_resolution,annotation_resolution_current
 
-MANE_TARGETS = {'FGFR1': ('NM_001127500.3', 'NM_023110.3'),
-                'MET': ('NM_001174067.1', 'NM_000245.4')}
+MANE_TARGETS = {'FGFR1': ('NM_001174067.1', 'NM_023110.3'),
+                'MET': ('NM_001127500.3', 'NM_000245.4')}
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,10 @@ class QualityFlag:
 
 def kind_key(value: str) -> str:
     return value.replace(' ', '').lower()
+
+
+def overlapping_genes(v: Variant) -> bool:
+    return bool(annotation_group(v)) or len({gene.strip().casefold() for gene in v.gene.split(',') if gene.strip()})>1
 
 
 def qc_flags(v: Variant) -> list[QualityFlag]:
@@ -31,10 +36,17 @@ def qc_flags(v: Variant) -> list[QualityFlag]:
             flags.append(QualityFlag('CNV', 'Failed', f'Copy Number {v.copy_number:g} <1.'))
         elif v.copy_number == 1:
             flags.append(QualityFlag('CNV review', 'Review', 'Copy Number =1; review the boundary value.'))
-    if kind == 'rnaexontiles' and v.call.upper() == 'NO CALL':
-        flags.append(QualityFlag('Expression imbalance', 'Failed', 'RNAExonTiles: NO CALL.'))
-    if kind == 'rnaexonvariant' and v.call.upper() == 'ABSENT':
-        flags.append(QualityFlag('RNAExonVariant', 'Report', 'RNAExonVariant: ABSENT.'))
+    call=v.call.strip().upper()
+    if kind == 'rnaexontiles':
+        if call == 'NO CALL':
+            flags.append(QualityFlag('Expression imbalance', 'Failed', 'RNAExonTiles: NO CALL.'))
+        elif call not in {'PRESENT','ABSENT'}:
+            flags.append(QualityFlag('Expression imbalance', 'Unknown', 'RNAExonTiles Call missing or unrecognized.'))
+    if kind == 'rnaexonvariant':
+        if call == 'ABSENT':
+            flags.append(QualityFlag('RNAExonVariant', 'Report', 'RNAExonVariant: ABSENT.'))
+        elif call != 'PRESENT':
+            flags.append(QualityFlag('RNAExonVariant', 'Unknown', 'RNAExonVariant Call missing or unrecognized.'))
     return flags
 
 
@@ -42,12 +54,17 @@ def review_reasons(v: Variant) -> list[str]:
     reasons = []
     if 'delins' in v.coding.lower() or kind_key(v.kind) == 'complex':
         reasons.append('Mutalyzer')
-    coding=v.corrected_hgvs or v.coding
-    if any(1 <= int(n) <= 100 for n in re.findall(r'\d+[+-](\d+)', coding)):
+    # Genomic normalization can remove the c. intron offset from the reviewed
+    # name. Retain the original transcript context for splicing triage.
+    coding=' '.join(filter(None,[v.coding,v.corrected_hgvs]))
+    offsets=(n.lstrip('0') for n in re.findall(r'\d+[+-](\d+)',coding))
+    if any(n and len(n)<=3 and 1<=int(n)<=100 for n in offsets):
         reasons.append('SpliceAI')
     target = MANE_TARGETS.get(v.gene)
     if target and (target[0] in v.transcript or not v.transcript):
         reasons.append('MANE')
-    if ',' in v.transcript or ',' in v.gene:
+    if needs_annotation_resolution(v) and not annotation_resolution_current(v):
+        reasons.append('Kobling må kontrolleres')
+    elif ',' in v.transcript or ',' in v.gene:
         reasons.append('Multiple transcripts / genes')
     return reasons

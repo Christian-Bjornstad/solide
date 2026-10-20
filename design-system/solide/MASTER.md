@@ -6,19 +6,36 @@ and white palette. No web framework, remote fonts or decorative animation.
 
 Primary #425B3D; surface #FFFFFF; background #F5F7F4; text #243128;
 muted #596454; border #DEE5DA; review #FFF2D5; failure #FCE5E3.
-Segoe UI body 14px, headings 28px, secondary status 12px.
+Segoe UI body 16px, headings 28px, secondary status 12px.
 
 White 190px navigation rail, consistent stroke icons, green active item.
 Compact header with session counts. Rounded surfaces (8–10px), 14px layout gaps,
 44px action buttons, 36px table rows, visible keyboard focus and explicit status
 text alongside colour. Native accessible table models and numeric sorting.
 
-Four English destinations: Workspace, Searches, Reports, Settings. Workspace
-combines file actions and a Variants / Quality view selector. Variant details and
-identity review use two tabs; source data opens on demand. Activity logs expand
-from a common footer, with run status always visible. Settings scrolls when space
-is limited. Secondary explanations live in tooltips and documentation; keep
-action labels and necessary review / error states visible.
+Four English destinations: Import, Variants, Searches, Settings. Import contains
+file actions and a Sample / Analysis / File / Rows overview. Variants contains
+per-file selection and a Variants / Quality view selector. A persistent sample
+list makes the active file clear; no assumption that samples have both assays.
+Detected import defaults appear first, with assay/genome details available on
+demand. Missing OUM input has inline validation and a visibly disabled Add action.
+
+Searches combines runs, results and Excel export. Sources/tissue fold out when
+needed to preserve result-table space. Variant details and identity review use
+two tabs; source data opens on demand. Activity logs expand from a common footer.
+Settings scrolls when space is limited. Keep explanations in tooltips and docs.
+
+October simplification: TSV is the everyday import. Recognised files with one
+OUM open without confirmation; ambiguous identities still require input. No
+save/open-review actions or permanent workspace selector. Current-session files,
+captures and activity are temporary; explicit Export Excel asks for a destination.
+The variant table shows row numbers, grid lines and cell selection with Ctrl+C.
+Variant details start collapsed. Settings has Appearance & browser and Database
+accounts, capped at 920px with scroll and consistent gaps. Omit explanatory storage
+cards, workflow banners and sidebar headings/footers. Preserve the imported-file
+switcher. Use explicit green checkboxes, dropdown chevrons and subtle scrollbars.
+The app icon is a white S on a green rounded square; edit assets/solide.svg and
+run scripts/build_icon.py to regenerate PNG/ICO files.
 
 Check all pages at 1440×940 and 1050×700 using synthetic data. Wide scientific
 tables retain native horizontal scrolling rather than hide source columns.

@@ -7,6 +7,26 @@ from solide._vendor.archer.core.models import DatabaseEvidence
 from solide._vendor.archer.services.browser_review import BrowserReviewService
 
 
+@pytest.mark.parametrize('body',['Loading…','Server error','Please sign in','Currently, 1 Reports Report ID Entry Date Cancer Type Delete'])
+def test_zero_delete_buttons_on_unverified_or_nonempty_list_blocks_submission(tmp_path,monkeypatch,body):
+    service=BrowserReviewService(profile_root=tmp_path)
+    def locator(selector):
+        return SimpleNamespace(inner_text=lambda:body,count=lambda:0)
+    page=SimpleNamespace(url='https://mtbp.org/patients/',locator=locator)
+    monkeypatch.setattr(service,'_goto_with_retries',lambda *args:None)
+    with pytest.raises(RuntimeError,match='confirmed|unavailable|empty'):
+        service._cleanup_stale_mtbp_reports(page,progress=None)
+
+
+def test_explicit_rendered_zero_count_can_confirm_empty_portal(tmp_path,monkeypatch):
+    service=BrowserReviewService(profile_root=tmp_path)
+    body='Currently, 0 Reports Report ID Entry Date Cancer Type Delete'
+    page=SimpleNamespace(url='https://mtbp.org/patients/',locator=lambda selector:
+        SimpleNamespace(inner_text=lambda:body,count=lambda:0))
+    monkeypatch.setattr(service,'_goto_with_retries',lambda *args:None)
+    assert service._cleanup_stale_mtbp_reports(page,progress=None)['remaining_reports']==0
+
+
 @pytest.mark.parametrize("identifier", ["SOLIDE-old", "ARCHER-old", "manual report"])
 def test_delete_verifies_server_after_settling(tmp_path, monkeypatch, identifier):
     service = BrowserReviewService(profile_root=tmp_path)
@@ -16,7 +36,8 @@ def test_delete_verifies_server_after_settling(tmp_path, monkeypatch, identifier
     row = SimpleNamespace(locator=lambda _: button)
     link = SimpleNamespace(count=lambda: int(state["checks"] < 2), locator=lambda _: row)
     page = SimpleNamespace(url="https://mtbp.org/patients/", get_by_role=lambda *a, **k: link,
-                           once=lambda *a: None, wait_for_timeout=state["waits"].append)
+                           once=lambda *a: None, wait_for_timeout=state["waits"].append,
+                           locator=lambda _:SimpleNamespace(inner_text=lambda:'Currently, 0 Reports Report ID Entry Date Cancer Type Delete'))
     monkeypatch.setattr(service, "_goto_with_retries", lambda *a, **k: state.update(checks=state["checks"] + 1))
     assert service._delete_mtbp_report(page, identifier)["status"] == "deleted"
     assert state["clicked"] == 1
@@ -28,7 +49,8 @@ def test_delete_control_identity_mismatch_does_not_click(tmp_path):
     button = SimpleNamespace(count=lambda: 1, get_attribute=lambda _: "different",
                              click=lambda: pytest.fail("Wrong report must not be deleted"))
     link = SimpleNamespace(count=lambda: 1, locator=lambda _: SimpleNamespace(locator=lambda _: button))
-    page = SimpleNamespace(url="https://mtbp.org/patients/", get_by_role=lambda *a, **k: link)
+    page = SimpleNamespace(url="https://mtbp.org/patients/", get_by_role=lambda *a, **k: link,
+        locator=lambda _:SimpleNamespace(inner_text=lambda:'Currently, 1 Reports Report ID Entry Date Cancer Type Delete'))
     assert service._delete_mtbp_report(page, "requested")["status"] == "failed"
 
 
@@ -47,7 +69,8 @@ def test_delete_navigates_from_patient_report_to_list(tmp_path, monkeypatch):
     service = BrowserReviewService(profile_root=tmp_path)
     destinations = []
     page = SimpleNamespace(url="https://mtbp.org/patients/123/sample/123/report/456/",
-                           get_by_role=lambda *a, **k: SimpleNamespace(count=lambda: 0))
+                           get_by_role=lambda *a, **k: SimpleNamespace(count=lambda: 0),
+                           locator=lambda _:SimpleNamespace(inner_text=lambda:'Currently, 0 Reports Report ID Entry Date Cancer Type Delete'))
     monkeypatch.setattr(service, "_goto_with_retries", lambda current, url: (destinations.append(url), setattr(current, "url", url)))
     assert service._delete_mtbp_report(page, "SOLIDE-test")["status"] == "already_absent"
     assert destinations == ["https://mtbp.org/patients/"]

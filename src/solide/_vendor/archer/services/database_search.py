@@ -220,7 +220,10 @@ class DatabaseSearchService:
             )
         if not query:
             query = f"chr{expected.chromosome}:{expected.position} {expected.reference}>{expected.alternate}"
-        cache_key = "|".join(self._clinvar_queries(variant))
+        cache_key = "|".join((
+            expected.assembly, expected.chromosome, str(expected.position),
+            expected.reference, expected.alternate, *self._clinvar_queries(variant),
+        ))
         if cache_key in self._clinvar_cache:
             return self._clinvar_cache[cache_key]
         try:
@@ -460,14 +463,21 @@ class DatabaseSearchService:
         return "https://www.ncbi.nlm.nih.gov/clinvar/?term=" + urllib.parse.quote(query)
 
     def _clinvar_queries(self, variant: VariantRecord) -> list[str]:
-        queries = [f"{variant.hgvsc}[VARNAME]"] if variant.hgvsc else []
+        queries = []
+        identity = genomic_identity(variant)
+        if (identity and len(identity.reference) != len(identity.alternate)
+                and all(re.fullmatch(r"[ACGT]+", allele) for allele in
+                        (identity.reference, identity.alternate))):
+            queries.append(f"{identity.chromosome}:{identity.position}:{identity.reference}:"
+                           f"{identity.alternate}(GRCh37)")
+        if variant.hgvsc:
+            queries.append(f"{variant.hgvsc}[VARNAME]")
         queries.extend(
             identifier
             for identifier in re.findall(
                 r"\brs\d+\b", variant.dbsnp_id or "", flags=re.IGNORECASE
             )
         )
-        identity = genomic_identity(variant)
         if identity is not None:
             queries.append(
                 f"{identity.chromosome}[chr] AND {identity.position}[chrpos37]"
