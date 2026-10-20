@@ -2,6 +2,12 @@
 
 ## 0.8.2 — 20 October 2026
 
+- Verify filtered RefSeq/assembly mappings in exact genomic transcript context
+  when reference sequences differ elsewhere (ATRX, ATM and KRAS inputs).
+- Validate promoter positions outside the mRNA sequence against the explicit
+  GRCh37 source allele and exact transcript, retaining the original rejection.
+- Complete verified genomic-only OPA normalizations without repeatedly marking
+  them for review. Extend public API recovery to BRCA Exchange.
 - Recover public Mutalyzer and SpliceAI API reads through managed Edge when
   Python cannot connect or a proxy rejects access. Reuse one isolated temporary
   connection per search run and retain the same response/identity checks.

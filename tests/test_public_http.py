@@ -57,6 +57,19 @@ def test_proxy_html_block_page_does_not_masquerade_as_a_variant_validation_error
     browser.assert_called_once()
 
 
+def test_brca_exchange_public_lookup_keeps_filters_and_recovers_proxy_failure():
+    direct=Mock();direct.get.side_effect=requests.exceptions.ProxyError('Synthetic work-PC proxy')
+    browser=Mock(return_value=response())
+    with PublicHttpSession(direct,browser_get=browser) as session:
+        session.get('https://brcaexchange.org/backend/data/',params={
+            'filter':['Gene_Symbol','Genomic_Coordinate_hg37'],
+            'filterValue':['BRCA1','chr17:g.41246494:G>T'],'include':'all','format':'json',
+            'page_num':0,'page_size':100},allow_redirects=False,timeout=45)
+    url=browser.call_args.args[0]
+    assert 'filter=Gene_Symbol' in url and 'filterValue=BRCA1' in url
+    assert 'Genomic_Coordinate_hg37' in url
+
+
 @pytest.mark.parametrize('url', ['https://example.org/api/', 'http://mutalyzer.nl/api/normalize/x',
     'https://user:secret@mutalyzer.nl/api/normalize/x', 'https://mutalyzer.nl.evil.org/api/'])
 def test_browser_fallback_never_visits_unapproved_origins(url):

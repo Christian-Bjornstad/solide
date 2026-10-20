@@ -18,7 +18,7 @@ import re
 
 import requests
 
-from ._vendor.archer.services.system_trust import system_trust_session
+from .public_http import public_api_session as system_trust_session
 from .models import Variant
 from .nomenclature import genomic_query, hgvs_query
 

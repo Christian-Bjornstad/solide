@@ -24,6 +24,9 @@ def _allowed(url):
         return (address.path.startswith(('/api/normalize/', '/api/delins_model/'))
                 or address.path in {'/api/map/', '/api/reference_model/'}) and set(parse_qs(address.query)) <= {
                     'description', 'reference_id', 'selector_id', 'filter_out'}
+    if address.netloc == 'brcaexchange.org':
+        return address.path in {'/backend/data/','/backend/data/variant/'} and set(parse_qs(address.query)) <= {
+            'format','include','page_size','page_num','filter','filterValue','search_term','variant_id'}
     return address.netloc == 'spliceai-37-xwkwwwxdwq-uc.a.run.app' and address.path == '/spliceai/' and set(
         parse_qs(address.query)) <= {'hg', 'variant', 'distance', 'mask'}
 

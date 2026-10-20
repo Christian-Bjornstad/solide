@@ -138,7 +138,7 @@ def _normalize_description(http, description: str, basis: str) -> dict:
 def _intronic_genomic_candidate(v: Variant, http, result: dict) -> None:
     errors = result['normalization'].get('errors')
     if (not isinstance(errors, list) or not errors
-            or any(not isinstance(error, dict) or error.get('code') != 'EINTRONIC' for error in errors)
+            or any(not isinstance(error, dict) or error.get('code') not in {'EINTRONIC','EOUTOFBOUNDARY'} for error in errors)
             or v.corrected_hgvs or v.controlled_genomic):
         return
     try:
@@ -151,6 +151,7 @@ def _intronic_genomic_candidate(v: Variant, http, result: dict) -> None:
     # Require that hg19 context to agree with the source chromosome; no accession
     # or assembly is inferred from gene names. Both requests retain their input.
     for error in errors:
+        if error.get('code')=='EOUTOFBOUNDARY':continue
         assemblies = error.get('assemblies')
         grch37 = assemblies.get('GRCh37') if isinstance(assemblies, dict) else None
         context = grch37.get(transcript) if isinstance(grch37, dict) else None
@@ -195,9 +196,9 @@ def _intronic_context_normalization(v: Variant, http, result: dict) -> None:
     candidate = result.get('genomic_normalization', {})
     genomic = candidate.get('normalization', {})
     if (v.corrected_hgvs or v.controlled_genomic
-            or not re.fullmatch(r'(?:NM|NR)_\d+\.\d+:c\..+', original)
+            or not re.fullmatch(r'(?:NM|NR)_\d+\.\d+:[cn]\..+', original)
             or not isinstance(errors, list) or not errors
-            or any(not isinstance(error, dict) or error.get('code') != 'EINTRONIC' for error in errors)
+            or any(not isinstance(error, dict) or error.get('code') not in {'EINTRONIC','EOUTOFBOUNDARY'} for error in errors)
             or not isinstance(genomic.get('normalized_model'), dict)
             or genomic.get('errors') or genomic.get('input_description') != candidate.get('original')):
         return
@@ -208,6 +209,7 @@ def _intronic_context_normalization(v: Variant, http, result: dict) -> None:
         if candidate.get('original') != source:
             return
         for error in errors:
+            if error.get('code')=='EOUTOFBOUNDARY':continue
             assemblies = error.get('assemblies')
             grch37 = assemblies.get('GRCh37') if isinstance(assemblies, dict) else None
             context = grch37.get(transcript) if isinstance(grch37, dict) else None
@@ -302,12 +304,30 @@ def _genomic_projection(http,data: dict,reference: str,checks: dict) -> str:
         'reference_id':'GRCh37','selector_id':transcript,'filter_out':'true'},timeout=45)
     response.raise_for_status();mapping=response.json()
     checks.setdefault('genomic_mappings',{})[description]=mapping
-    if not isinstance(mapping,dict) or mapping.get('ref_seq_differences') is not False:
-        raise ValueError('Genomic mapping did not exclude reference-sequence differences.')
+    if not isinstance(mapping,dict) or type(mapping.get('ref_seq_differences')) is not bool:
+        raise ValueError('Genomic mapping did not describe reference-sequence differences.')
     mapped=mapping.get('mapped_description');genomic=mapping.get('genomic_description')
     if (not isinstance(mapped,str) or not mapped.startswith(f'{reference}({transcript}):')
             or not isinstance(genomic,str) or not genomic.startswith(reference+':g.')):
         raise _IdentityConflict('The mapped transcript or genomic assembly differs from the source.')
+    if mapping['ref_seq_differences']:
+        # RefSeq and assembly sequences can differ outside the tested event.
+        # The documented mapper filters those differences; independently check
+        # that filtered description on the exact genomic transcript before the
+        # caller compares its sequence event to the explicit source REF/ALT.
+        if mapping.get('filtered_variants') is not True:
+            raise ValueError('Genomic mapping did not filter reference-sequence differences.')
+        contextual=_normalize_description(http,mapped,'genomic_transcript_grch37')['normalization']
+        checks.setdefault('mapping_context_checks',{})[mapped]=contextual
+        contextual_name=contextual.get('normalized_description','')
+        if (contextual.get('errors') or not isinstance(contextual.get('normalized_model'),dict)
+                or contextual.get('input_description')!=mapped
+                or not isinstance(contextual_name,str) or not contextual_name.startswith(f'{reference}({transcript}):')
+                or _transcript(contextual_name)!=transcript
+                or contextual.get('gene_id')!=data.get('gene_id') or not data.get('gene_id')):
+            raise _IdentityConflict('The filtered mapping could not be validated on the exact genomic transcript.')
+        if _genomic_projection(http,contextual,reference,checks)!=genomic:
+            raise _IdentityConflict('The independently checked mapping describes a different genomic event.')
     return genomic
 
 
@@ -425,7 +445,7 @@ def _assess_normalization(v: Variant,http,result: dict,*,reference_identity=None
         if not transcript:
             assessment['reason']+=' No transcript was inferred from the equivalent-description list.'
         if contextual:
-            assessment['reason']='The original mRNA reference cannot validate intronic sequence. The exact transcript in GRCh37 genomic context matches the explicit source alleles. Review before applying.'
+            assessment['reason']='The original transcript reference cannot validate this intronic or out-of-boundary position. The exact transcript in GRCh37 genomic context matches the explicit source alleles. Review before applying.'
         checks['matched_event']=dict(reference=expected[0],start=expected[1],end=expected[2],inserted=expected[3])
     except _IdentityConflict as exc:
         assessment.update(status='Conflict',reason=str(exc))
@@ -540,7 +560,7 @@ def retain_confirmed_normalization(v: Variant, result: dict, tissue: str) -> boo
 
 def normalization_unchanged(v: Variant, result: dict) -> bool:
     assessment=result.get('nomenclature_assessment',{})
-    try:original=hgvs_query(v);genomic=genomic_query(v)
+    try:original,_=_normalization_query(v);genomic=genomic_query(v)
     except ValueError:return False
     data=result.get('normalization',{})
     return (assessment.get('status')=='Unchanged' and assessment.get('identity_confirmed') is True

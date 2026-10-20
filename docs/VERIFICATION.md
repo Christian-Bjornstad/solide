@@ -6,6 +6,36 @@ Local Windows / Python 3.12. Verification runs are dated below.
 
 **898 tests passed** in 69.43 seconds. Source compilation and diff checks passed.
 
+### Actual-input rerun — 20 October 2026
+
+- **914 tests passed** in 72.82 seconds after the actual-input regressions below.
+- Imported fourteen supplied TSVs (the twelve archived exports plus the two
+  original local inputs): 86 original source rows and 81 selected sequence
+  interpretations. All original hashes were preserved. Technical test sample
+  bindings were used; original patient identifiers were not sent to providers.
+- Live Mutalyzer checks initially exposed six unnecessarily blocked cases:
+  ATRX, three ATM variants, a TERT promoter variant and KRAS. RefSeq/assembly
+  sequence differences elsewhere now require independent normalization of the
+  filtered mapping in the exact genomic transcript context, followed by the
+  existing source-event comparison. Missing context, changed gene/version,
+  different events and malformed responses still fail closed.
+- Promoter EOUTOFBOUNDARY responses can now be checked against explicit GRCh37
+  source alleles using the exact genomic transcript. The original transcript
+  rejection remains retained; no coordinate is inferred from a gene name.
+- Rechecking all six yielded **81 confirmed identities: 71 unchanged and ten
+  normalized**. All fourteen reports opened normally in native Microsoft Excel
+  without repair, retaining the 86 original rows and 81 selected findings.
+- A real single-variant OPA input completed the production Qt import, selection,
+  search and export workers with live ClinVar, Franklin, COSMIC, OncoKB and MTBP
+  results and 25 embedded images. It completed again with Python API access
+  deliberately failing through a proxy, using managed Edge recovery.
+- Additional live forced-proxy checks returned the expected BRCA Exchange
+  record and six SpliceAI transcript score rows. BRCA Exchange now shares the
+  restricted public-API transport; authenticated providers remain browser based.
+- Live validation uses separate browser profiles and refuses to delete any
+  pre-existing MTBP reports. Only reports created by the validation run are
+  removed after local capture. User applications and normal profiles are kept.
+
 The supplied activity logs showed immediate Mutalyzer/SpliceAI failures while
 browser-based ClinVar and Franklin searches completed. The logs did not retain
 the underlying API exception, so they cannot establish the exact workstation
