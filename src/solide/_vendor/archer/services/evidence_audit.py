@@ -16,7 +16,7 @@ from solide._vendor.archer.services.capture_validation import validate_capture
 
 
 AUDIT_SCHEMA_VERSION = 2
-MTBP_MATCHING_REVISION = 2
+MTBP_MATCHING_REVISION = 3
 RETRYABLE_EVIDENCE_STATUSES = frozenset(
     {
         "error",

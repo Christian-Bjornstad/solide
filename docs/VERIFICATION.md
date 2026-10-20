@@ -8,6 +8,33 @@ Local Windows / Python 3.12. Verification runs are dated below.
 
 ### Actual-input rerun — 20 October 2026
 
+- **942 tests passed** in 70.36 seconds after the additional provider and
+  genomic-only input fixes. Source compilation and diff checks passed.
+- The full production GUI workflow also completed on the supplied 20-row HRR
+  input with 20 selected interpretations and 146 source jobs. All 20 Mutalyzer
+  identities were verified. Franklin returned 20 verified matches, OncoKB 20
+  source results, ClinVar 16 matches/four explicit no-hits, SpliceAI one verified
+  intronic result, and BRCA Exchange four verified matches/one no-hit. Sources
+  without applicable input were not queried. Excel opened normally with 20 raw
+  rows, 20 selected findings and 394 embedded images. The overlapping unselected
+  interpretation was not added to findings or the submitted MTBP group.
+- A two-variant KIT OPA run exposed a genomic-only complex variant that was
+  unnecessarily blocked after successful normalization. It now adopts only the
+  independently checked genomic name, retaining original cells and without
+  inferring a transcript or protein. Live MTBP rerun matched both distinct KIT
+  rows and exported normally. Its More popup reports VCF alleles with a padding
+  base; the shared event normalizer now compares complete, explicitly GRCh37
+  DNA events. Wrong assembly, coordinate, REF/ALT or protein remains rejected.
+  A genomic-only query cannot fall back to an unidentified gene-only row.
+- The HRR COSMIC identifier COSM937333 returned zero Legacy Mutations and 15
+  unrelated fuzzy results on the fully loaded website. A fresh live rerun now
+  records no exact legacy match instead of a transient rendering failure;
+  unrelated records are not used. Other exact COSMIC lookups still succeed.
+- Native Excel additionally opened the full HRR report and both KIT reports
+  without repair (394, 41 and four images). Franklin's expanded Clinical evidence
+  image was read back from an exported workbook and visually checked.
+- An isolated inversion of the new genomic-event comparison was detected by
+  its regression tests; the source was restored byte-for-byte afterwards.
 - **914 tests passed** in 72.82 seconds after the actual-input regressions below.
 - Imported fourteen supplied TSVs (the twelve archived exports plus the two
   original local inputs): 86 original source rows and 81 selected sequence

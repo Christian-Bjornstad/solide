@@ -438,7 +438,8 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             summary += '\n' + data['genomic_normalization_issue']
                         assessment=data.get('nomenclature_assessment',{})
                         if assessment:summary='Nomenclature: '+assessment['status']+'\n'+assessment.get('reason','')+'\n'+summary
-                        unchanged=normalization_unchanged(v,data) and not v.corrected_hgvs
+                        unchanged=(normalization_unchanged(v,data) and not v.corrected_hgvs
+                            and not (not v.transcript and 'Mutalyzer' in review_reasons(v)))
                         if not unchanged and ((not errors and norm.get('normalized_description')) or
                                 (assessment.get('identity_confirmed') and data.get('contextual_normalization'))):
                             try:

@@ -4,6 +4,15 @@ Keep the complete Solide project in a permanent folder. The CMD and Python files
 must stay beside pyproject.toml and the src folder. Original data and saved
 reviews are not part of the installation package.
 
+## Updating an existing installation
+
+Extract the complete new package into a separate folder and run its
+**SOLIDE_START.cmd**. The bootstrap selects that folder's source code before any
+older editable installation. Version 0.8.2 adds no dependencies; when the existing
+installation already works, reinstalling packages is unnecessary. Check the
+version in the window title. Use SOLIDE_INSTALL.cmd only for a first installation
+or missing dependencies.
+
 ## Work PC — Python FELLES / Ivanti
 
 1. Double-click **SOLIDE_INSTALL.cmd** once.

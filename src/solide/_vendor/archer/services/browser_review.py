@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit, urljoin
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
 from solide._vendor.archer.core.models import DatabaseEvidence, VariantRecord
-from solide._vendor.archer.services.genomic_notation import format_mtbp_grch37
+from solide._vendor.archer.services.genomic_notation import format_mtbp_grch37, normalize_vcf_change
 from solide._vendor.archer.services.mtbp_report_dom import MTBP_TABLE_ROWS_JS
 from solide._vendor.archer.services.capture_layout import expanded_capture_layout
 from solide._vendor.archer.services.provider_failures import (
@@ -903,6 +903,19 @@ class BrowserReviewService:
                 self._raise_for_cosmic_terminal_page(page)
                 page.wait_for_timeout(500)
             else:
+                body_text = page.locator("body").inner_text()
+                if (
+                    _cosmic_identifier(variant.cosmic_id).startswith("COSM")
+                    and re.search(r'Your search term\s+"' + re.escape(_cosmic_identifier(variant.cosmic_id)) + r'"', body_text, re.I)
+                    and re.search(r"\bLegacy Mutations\s*\(0\)", body_text, re.I)
+                    and re.search(r"\bShowing\s+[1-9]\d*\s+to\s+[1-9]\d*\s+of\s+[1-9]\d*\s+entries\b", body_text, re.I)
+                ):
+                    raise ProviderLookupError(
+                        ProviderFailureKind.NOT_FOUND,
+                        f"COSMIC returned no exact legacy record for {variant.cosmic_id}; other search hits were not used.",
+                        diagnostics={"failure_stage": "legacy_identifier_resolution",
+                                     "exact_legacy_hits": 0},
+                    )
                 raise ProviderLookupError(
                     ProviderFailureKind.TRANSIENT,
                     f"COSMIC did not finish rendering a canonical mutation link for {variant.cosmic_id}.",
@@ -4559,6 +4572,8 @@ def parse_mtbp_report(
         ]
         expected_protein = _mtbp_normalized_protein(_protein_change(variant.hgvsp))
         expected_cdna = _cdna_change(variant.hgvsc).casefold()
+        if not expected_cdna.startswith(('c.', 'n.')):
+            expected_cdna = ''
         submitted_count = len(submitted_by_gene[variant.symbol.casefold()])
         if not (expected_protein or expected_cdna or _mtbp_genomic_query(variant)):
             results[key] = DatabaseEvidence(
@@ -4736,7 +4751,7 @@ def _franklin_query(variant: VariantRecord) -> str:
 def _franklin_queries(variant: VariantRecord) -> list[str]:
     queries: list[str] = []
     cdna = _cdna_change(variant.hgvsc)
-    if variant.symbol and cdna:
+    if variant.symbol and cdna.startswith(('c.', 'n.')):
         queries.append(f"{variant.symbol}:{cdna}")
     identity = genomic_identity(variant)
     if identity:
@@ -4861,6 +4876,8 @@ def _franklin_quota_message(body_text: str) -> str:
 
 def _mtbp_variant_query(variant: VariantRecord) -> str:
     cdna = _cdna_change(variant.hgvsc)
+    if cdna.startswith('g.'):
+        return _mtbp_genomic_query(variant)
     cdna_accession = (variant.hgvsc or "").split(":", 1)[0]
     if cdna and ":" in (variant.hgvsc or "") and _mtbp_accession(cdna_accession):
         return f"{cdna_accession}:{cdna}"
@@ -5012,6 +5029,31 @@ def _mtbp_row_genomic_matches(text: str, variant: VariantRecord) -> bool:
 
 def _mtbp_row_genomic_state(text: str, variant: VariantRecord) -> bool | None:
     """True for exact GRCh37, False for explicit conflict, None if unreported."""
+    # The report's More popup uses VCF alleles, including a padding base for
+    # indels. Compare the entire minimal event, including reference sequence;
+    # matching a gene, protein or coordinate alone is insufficient.
+    vcf_reported = re.findall(
+        r"(?<![A-Za-z0-9_])(?:chr)?(\d{1,2}|X|Y|MT|M):\s*(\d+)\s+"
+        r"([ACGT]+)/([ACGT]+)\s*\((GRCh3[78])(?:/(hg(?:19|38)))?\)",
+        text or "", re.I,
+    )
+    if vcf_reported:
+        if any(alias and (assembly.casefold(), alias.casefold()) not in {
+            ("grch37", "hg19"), ("grch38", "hg38"),
+        } for _, _, _, _, assembly, alias in vcf_reported):
+            return False
+        expected_event = normalize_vcf_change(
+            variant.genomic_location, variant.ref_allele, variant.alt_allele,
+        )
+        grch37_events = [
+            normalize_vcf_change(f"chr{chromosome}:{position}", reference, alternate)
+            for chromosome, position, reference, alternate, assembly, _ in vcf_reported
+            if assembly.casefold() == "grch37"
+        ]
+        if not expected_event or not grch37_events or any(
+            event != expected_event for event in grch37_events
+        ):
+            return False
     reported = [
         (f"chr{'M' if chromosome.upper() == 'MT' else chromosome.upper()}:{change}".casefold(), assembly.casefold())
         for chromosome, change, assembly in re.findall(
@@ -5020,7 +5062,7 @@ def _mtbp_row_genomic_state(text: str, variant: VariantRecord) -> bool | None:
         )
     ]
     if not reported:
-        return None
+        return True if vcf_reported else None
     expected = _mtbp_genomic_query(variant)
     if not expected:
         return False
@@ -5033,7 +5075,7 @@ def _mtbp_row_cdna_matches(
     text: str, variant: VariantRecord, *, require_transcript: bool = False,
 ) -> bool:
     expected = _cdna_change(variant.hgvsc)
-    if not _contains_hgvs_change(text, expected):
+    if not expected.startswith(('c.', 'n.')) or not _contains_hgvs_change(text, expected):
         return False
     transcript_pattern = r"(?:(?:NM|NR|XM|XR)_\d+|ENST\d+)(?:\.\d+)?"
     qualified_input = re.match(r"(" + transcript_pattern + r")\s*:", variant.hgvsc, re.I)

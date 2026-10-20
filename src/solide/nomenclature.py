@@ -492,7 +492,10 @@ def apply_confirmed_normalization(v: Variant, result: dict) -> bool:
     be applied. The API's equivalent-description list alone is insufficient.
     """
     assessment=result.get('nomenclature_assessment',{})
-    if (not isinstance(assessment,dict) or assessment.get('status')!='Normalized'
+    adopt_genomic=(isinstance(assessment,dict) and assessment.get('status')=='Unchanged'
+        and result.get('query_basis')=='genomic_grch37' and not v.transcript and not v.corrected_hgvs
+        and ('delins' in v.coding.lower() or v.kind.replace(' ','').lower()=='complex'))
+    if (not isinstance(assessment,dict) or (assessment.get('status')!='Normalized' and not adopt_genomic)
             or assessment.get('identity_confirmed') is not True
             or not v.gene or ',' in v.gene or ',' in v.transcript):
         return False
@@ -504,7 +507,7 @@ def apply_confirmed_normalization(v: Variant, result: dict) -> bool:
         genomic=genomic_query(v)
     except ValueError:
         return False
-    if (result.get('original')!=original or suggested==original
+    if (result.get('original')!=original or (suggested==original and not adopt_genomic)
             or assessment.get('source_genomic_query')!=genomic):
         return False
     checks=result.get('genomic_identity_check')
@@ -530,6 +533,7 @@ def apply_confirmed_normalization(v: Variant, result: dict) -> bool:
     refresh_annotation_proof(v)
     result['nomenclature_application']={'applied':True,'from_hgvs':original,
         'to_hgvs':suggested,'source_genomic_query':genomic}
+    if adopt_genomic:result['nomenclature_application']['adopted_genomic']=True
     return True
 
 

@@ -2,6 +2,17 @@
 
 ## 0.8.2 — 20 October 2026
 
+- Use independently verified genomic names for complex OPA variants without
+  transcripts. Submit chromosome-qualified genomic queries to MTBP and allele
+  queries to Franklin rather than gene-qualified genomic positions.
+- Match MTBP's assembly-labelled VCF popup against the complete source event,
+  trimming shared padding and checking chromosome, position and both alleles.
+  Reject conflicting assemblies/DNA even if the protein matches; recheck older
+  no-hit results that contained gene rows.
+- Distinguish a completed COSMIC search with zero exact legacy matches from a
+  rendering timeout. Unrelated fuzzy search results never establish a match.
+- Include short update instructions for running from a fresh extracted folder
+  without reinstalling dependencies on an existing working installation.
 - Verify filtered RefSeq/assembly mappings in exact genomic transcript context
   when reference sequences differ elsewhere (ATRX, ATM and KRAS inputs).
 - Validate promoter positions outside the mRNA sequence against the explicit

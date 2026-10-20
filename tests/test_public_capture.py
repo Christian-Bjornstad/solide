@@ -99,7 +99,7 @@ def test_legacy_mtbp_gene_rows_are_rechecked_without_mutating_saved_result():
     assert build_search_plan(session,['MTBP'],'pending')=={(v.id,'MTBP')}
     assert build_search_plan(session,['MTBP'],'failed')=={(v.id,'MTBP')}
     assert e==before
-    e['raw']['identity_matching_version']=2
+    e['raw']['identity_matching_version']=3
     assert assess_evidence(v,e,session).label=='No match'
 
 
