@@ -3,7 +3,7 @@ import math
 import re
 from urllib.parse import quote
 import requests
-from ._vendor.archer.services.system_trust import system_trust_session
+from .public_http import public_api_session as system_trust_session
 from ._vendor.archer.services.genomic_notation import format_mtbp_grch37
 from .models import Variant
 from .quality import MANE_TARGETS
@@ -357,7 +357,7 @@ def _assess_normalization(v: Variant,http,result: dict,*,reference_identity=None
         assessment.update(status='Conflict',reason='The normalized transcript belongs to a different gene than the source.')
         return
     if (not returned_gene and isinstance(reference_identity,dict)
-            and reference_identity.get('status')=='resolved' and reference_identity.get('source')=='NCBI RefSeq'
+            and reference_identity.get('status')=='resolved' and reference_identity.get('source') in {'NCBI RefSeq','Mutalyzer RefSeq'}
             and reference_identity.get('transcript')==returned_transcript==requested_transcript==v.transcript
             and reference_identity.get('gene')==v.gene):
         returned_gene=reference_identity['gene']
@@ -538,10 +538,47 @@ def retain_confirmed_normalization(v: Variant, result: dict, tissue: str) -> boo
     return True
 
 
+def normalization_unchanged(v: Variant, result: dict) -> bool:
+    assessment=result.get('nomenclature_assessment',{})
+    try:original=hgvs_query(v);genomic=genomic_query(v)
+    except ValueError:return False
+    data=result.get('normalization',{})
+    return (assessment.get('status')=='Unchanged' and assessment.get('identity_confirmed') is True
+        and assessment.get('suggested_hgvs')==result.get('original')==original
+        and assessment.get('source_genomic_query')==genomic
+        and data.get('normalized_description')==original and not data.get('errors')
+        and bool(result.get('genomic_identity_check',{}).get('matched_event')))
+
+
+def confirmed_protein(v: Variant) -> str:
+    """Use only a current, same-event normalizer prediction on this transcript."""
+    if not v.nomenclature_verified or not v.corrected_hgvs:return ''
+    item=v.evidence.get('Mutalyzer',{})
+    raw=item.get('raw',{}) if item.get('fingerprint')==v.fingerprint(item.get('tissue','Other')) else {}
+    if not raw:
+        from .annotations import annotation_resolution_current
+        if annotation_resolution_current(v):raw=v.raw['_annotation_resolution'].get('normalization',{})
+    assessment=raw.get('nomenclature_assessment',{})
+    data=raw.get('contextual_normalization',{}).get('normalization') or raw.get('normalization',{})
+    if (assessment.get('identity_confirmed') is not True or assessment.get('status') not in {'Normalized','Unchanged'}
+            or assessment.get('suggested_hgvs')!=v.corrected_hgvs
+            or data.get('normalized_description')!=v.corrected_hgvs or data.get('gene_id')!=v.gene
+            or data.get('errors')):return ''
+    try:
+        if assessment.get('source_genomic_query')!=genomic_query(v):return ''
+    except ValueError:return ''
+    transcript=_transcript(v.corrected_hgvs)
+    name=data.get('protein',{}).get('description','')
+    if not isinstance(name,str) or not transcript:return ''
+    match=re.fullmatch(r'(?:NC_\d+\.\d+\()?'+re.escape(transcript)
+        +r'\(NP_\d+\.\d+\)\)?:('r'p\.[A-Za-z0-9_*?()=;\[\].]+)',name)
+    return match[1] if match else ''
+
+
 def display_identity(v: Variant) -> tuple[str,str,str]:
     """Present a checked nucleotide identity without inferring a protein name."""
     if v.nomenclature_verified and v.corrected_hgvs:
-        return v.corrected_hgvs,'',_transcript(v.corrected_hgvs)
+        return v.corrected_hgvs,confirmed_protein(v),_transcript(v.corrected_hgvs)
     return v.coding,v.protein,v.transcript
 
 

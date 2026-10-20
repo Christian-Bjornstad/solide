@@ -1,6 +1,54 @@
-# Verification — Solide v0.8.1
+# Verification — Solide
 
-Dates: 9–16 October 2026. Local Windows / Python 3.12.
+Local Windows / Python 3.12. Verification runs are dated below.
+
+## Workstation API recovery — 20 October 2026, v0.8.2
+
+**898 tests passed** in 69.43 seconds. Source compilation and diff checks passed.
+
+The supplied activity logs showed immediate Mutalyzer/SpliceAI failures while
+browser-based ClinVar and Franklin searches completed. The logs did not retain
+the underlying API exception, so they cannot establish the exact workstation
+network cause. The export error came from one unresolved selected annotation;
+that same annotation correctly prevented submission of an incomplete MTBP batch.
+
+- Public API transport now tries managed Edge after a Python connection/TLS
+  failure, proxy HTTP 403/407 response, or HTML access page. One isolated
+  temporary browser session is reused within the worker and closed afterwards.
+  Destination allowlists, HTTPS, response status, exact request identity and
+  all existing genomic-event validation remain enforced. No credentials,
+  patient IDs, filenames or raw source rows are passed to the transport.
+- If NCBI is unreachable, exact transcript identity can be checked against
+  Mutalyzer's RefSeq model, including organism, accession/version, unique gene
+  and CDS/protein hierarchy. A substantive NCBI reference conflict does not
+  trigger this fallback. NM and NR cases, malformed/conflicting references,
+  cooldown, reuse and cleanup have regression coverage.
+- Live testing forced Python TLS failure for every API read and separately
+  blocked NCBI. The two KIT examples and NF1 example normalized to the expected
+  delins/dup names and predicted proteins. Reordered KLLN/PTEN candidates
+  resolved to PTEN c.19G>A, then four selected findings exported successfully.
+  Native Microsoft Excel opened the report normally without repair and retained
+  all four original source rows, including the old KIT spelling.
+- Live checks also resolved the supplied H3-3A/H3P6, TET2/TET2-AS1 and reordered
+  CSDE1/NRAS examples. NRAS resolved to NM_002524.5:c.34G>T / p.(Gly12Cys).
+- A deliberately wrong PTEN reference base returned HTTP 422 through Edge and
+  stayed a sequence conflict. The intronic PTEN c.254-1G>A example was verified
+  in its explicit GRCh37 context; SpliceAI returned six transcript score rows
+  for chr10-89692769-G-A.
+- MTBP query generation retained normalized HGVS and its allele-equivalent
+  genomic fallback for all four selected examples. A regression test recovers
+  the entire selected batch after a temporary annotation outage. No authenticated
+  MTBP submission was performed in this verification run.
+- The synthetic stress run passed 51 checks with 1,500 random GUI actions and
+  a 5,000-row input. Original fixture hashes were unchanged. A mutation of the
+  fallback organism guard was detected by its regression test.
+
+Workstation-specific proxy/Edge access and authenticated MTBP submission still
+need verification on the affected work PC. Export continues to reject unresolved
+selected identities; it now identifies the transcript/source row and explains
+retrying or explicitly deselecting the row, without silently omitting findings.
+All supplied logs, workbook notes and generated verification artifacts stay
+local and Git-ignored.
 
 ## Windows install/start launchers — 16 October 2026
 

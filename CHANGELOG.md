@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.2 — 20 October 2026
+
+- Recover public Mutalyzer and SpliceAI API reads through managed Edge when
+  Python cannot connect or a proxy rejects access. Reuse one isolated temporary
+  connection per search run and retain the same response/identity checks.
+- Resolve exact human transcript identity through Mutalyzer's RefSeq model when
+  NCBI is unreachable. Reject reference-version, gene, organism and CDS conflicts.
+- Identify the annotation and original row blocking Excel or the combined MTBP
+  batch. Include the actual failure cause in activity logs and allow Retry failed
+  to recover the whole batch after a temporary annotation outage.
+- Mark independently checked unchanged Mutalyzer names as complete without
+  taking an unused screenshot. Show a verified normalized protein prediction
+  with corrected DNA names while retaining original imported protein text.
+- Show the application version in the window and startup log.
+
 ## Unreleased — 19 October 2026
 
 - Recover from cancelled/failed login without leaving Edge profiles or active

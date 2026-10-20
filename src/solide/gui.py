@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLa
     QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
     QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
+from . import __version__
 from .analyses import add_analysis,ensure_analyses,analysis_scoped_session,rename_analysis_sample
 from .annotations import source_row_groups,annotation_resolution_current
 from .import_dialog import SampleImportDialog,OumLineEdit
@@ -190,7 +191,7 @@ class MainWindow(QMainWindow):
         self.config_path=Path.home()/'.solide'/'ui_config.json'
         self.config=read_ui_settings(self.config_path)
         self.login_verified=set();self.close_after_login=False
-        self.setWindowTitle('Solide | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
+        self.setWindowTitle(f'Solide {__version__} | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
         self.setMinimumSize(1050,700);self.setPalette(light_palette());self.setStyleSheet(STYLE)
         central=QWidget();self.setCentralWidget(central)
         horizontal=QHBoxLayout(central);horizontal.setContentsMargins(0,0,0,0);horizontal.setSpacing(0)
@@ -243,7 +244,7 @@ class MainWindow(QMainWindow):
         self.nav.currentRowChanged.connect(self.navigate);self.nav.setCurrentRow(0)
         self.apply_appearance()
         self.refresh()
-        self.record_activity('Application started')
+        self.record_activity(f'Application started · Solide {__version__}')
 
     def consolidate_workspace(self):
         original=[self.pages.widget(i) for i in range(self.pages.count())]
@@ -824,7 +825,9 @@ class MainWindow(QMainWindow):
             self.normalization_status.setText('Outdated — rerun Mutalyzer for the current identity.');return
         assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
         applied=evidence.get('raw',{}).get('nomenclature_application',{}).get('applied') is True
+        unchanged=assessment.get('status')=='Unchanged' and assessment.get('identity_confirmed') is True
         self.normalization_status.setText('Normalisert · brukes i søk og rapport' if applied else
+            'Navnet er kontrollert · uendret' if unchanged else
             assessment.get('status','Review required')+' · '+assessment.get('reason',evidence.get('summary','')))
         if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict':return
         candidates=assessment.get('candidates',[])
@@ -1195,7 +1198,12 @@ class MainWindow(QMainWindow):
         if 'provisional_status' not in e.get('raw',{}):
             self.run_done.add(key);self.progress.setValue(len(self.run_done))
             assessment=assess_evidence(v,e,self.session)
-            self.record_activity(f'{source} · {v.gene}: {assessment.label}')
+            detail=''
+            if assessment.retryable or e.get('status') in {'needs_review','error','network_error'}:
+                detail=' | '+str(e.get('summary') or assessment.reason).replace('\n',' ')[:800]
+                failure=e.get('raw',{}).get('failure') or v.raw.get('_annotation_resolution',{}).get('failure')
+                if failure:detail+=' | '+str(failure.get('type',''))
+            self.record_activity(f'{source} · {v.gene}: {assessment.label}'+detail)
         if source=='Mutalyzer' and self.current_variant is v:
             row=next((i for i,item in enumerate(self.variant_model.variants) if item is v),None)
             if row is not None:self.show_variant(self.proxy.mapFromSource(self.variant_model.index(row,0)))

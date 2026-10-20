@@ -18,10 +18,11 @@ from .annotations import needs_annotation_resolution, annotation_resolution_curr
 from .annotation_identity import TranscriptIdentityResolver
 from .annotation_resolution import resolve_annotation
 from .quality import review_reasons, MANE_TARGETS
-from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, apply_confirmed_normalization, retain_confirmed_normalization, spliceai_variant, spliceai_summary, validate_spliceai_response
+from .nomenclature import hgvs_query, genomic_query, minimal_genomic_query, normalize_variant, apply_confirmed_normalization, retain_confirmed_normalization, spliceai_variant, spliceai_summary, validate_spliceai_response, confirmed_protein, normalization_unchanged
 from .brca_exchange import brca_exchange_variant
 from .public_capture import capture_spliceai,capture_mutalyzer,capture_brca_exchange,spliceai_url
 from .source_failures import source_failure
+from .public_http import public_api_run
 from ._vendor.archer.core.models import VariantRecord,DatabaseEvidence
 from ._vendor.archer.services.browser_review import BrowserReviewService, BrowserReviewCancelled,_cosmic_identifiers
 from ._vendor.archer.services.evidence_audit import audit_digest,mtbp_legacy_matching_issue
@@ -77,6 +78,8 @@ def assess_evidence(v, evidence, session):
     resolution=v.raw.get('_annotation_resolution',{})
     if status=='needs_review' and resolution.get('status')=='unresolved' and resolution.get('retryable') is True:
         return EvidenceAssessment('Recheck required',resolution.get('reason','Prøv koblingskontrollen igjen.'),True)
+    if status=='needs_review' and raw.get('blocked_by_annotations') and raw.get('retryable') is True:
+        return EvidenceAssessment('Recheck required',evidence.get('summary','Prøv annotasjonskontrollen igjen.'),True)
     if evidence.get('database')=='MTBP':
         issue=mtbp_legacy_matching_issue(DatabaseEvidence('MTBP',status,raw=raw))
         if issue:return EvidenceAssessment('Recheck required',issue,True)
@@ -92,6 +95,8 @@ def assess_evidence(v, evidence, session):
     if status=='not_found':return EvidenceAssessment('No match','Search completed without a matching record.')
     if status=='not_applicable':return EvidenceAssessment('Not applicable',evidence.get('summary',''))
     if evidence.get('database')=='Mutalyzer' and status=='verified':
+        if normalization_unchanged(v,raw) and raw.get('nomenclature_application',{}).get('applied') is not True:
+            return EvidenceAssessment('Verified match','Variantnavnet er kontrollert og uendret.')
         applied=raw.get('nomenclature_application',{})
         checked=raw.get('nomenclature_assessment',{})
         if (applied.get('applied') is True and checked.get('identity_confirmed') is True
@@ -209,7 +214,7 @@ def query_record(v: Variant, source: str = '') -> VariantRecord:
     # No local filenames, sample IDs, raw worksheet fields or comments sent downstream.
     pseudonym = 'S' + hashlib.sha256(v.patient.encode()).hexdigest()[:16]
     return VariantRecord(source_file=Path('variant.tsv'), source_row=0, sample=pseudonym,
-        symbol=v.gene, hgvsc=hgvsc, hgvsp='' if v.corrected_hgvs else v.protein,
+        symbol=v.gene, hgvsc=hgvsc, hgvsp=confirmed_protein(v) if v.corrected_hgvs else v.protein,
         transcript=hgvsc.split(':')[0] if hgvsc.startswith('NM_') else v.transcript,
         genomic_location=locus, ref_allele=ref, alt_allele=alt,
         variant_type=v.kind, cosmic_id=cosmic_ids)
@@ -312,6 +317,7 @@ def _resolve_queue_annotations(selected,plan,control,progress,identity_resolved,
     return blocked
 
 
+@public_api_run()
 def run_queue(session: Session, sources: list[str], root: Path, control: QueueControl,
               emit, progress, background=True, *, plan=None, credentials=None,
               plan_changed=None, expand_after_normalization=True, identity_resolved=None) -> None:
@@ -367,10 +373,21 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                 store(variant,source,{'status':'needs_review','summary':reason})
     blocked_mtbp_groups={_analysis_group(variant) for variant in selected if variant.id in blocked
                          and any(pending(row,'MTBP') for row in selected if _analysis_group(row)==_analysis_group(variant))}
+    def blocked_batch_summary(group):
+        rows=[row for row in selected if _analysis_group(row)==group and row.id in blocked]
+        identities=', '.join((row.transcript or row.gene or 'variant')
+            +(f' (kilderad {row.source_row})' if row.source_row else '') for row in rows[:5])
+        reason=rows[0].raw.get('_annotation_resolution',{}).get('reason','') if rows else ''
+        return (f'MTBP venter på avklaring av {len(rows)} valgt(e) rad(er): {identities}. '
+            +reason+' Kjør søket på nytt, eller fjern valget for disse radene i Varianter.')
     for variant in selected:
         if _analysis_group(variant) in blocked_mtbp_groups and pending(variant,'MTBP') and variant.id not in blocked:
             store(variant,'MTBP',{'status':'needs_review',
-                'summary':'MTBP-gruppen er stoppet fordi en valgt annotasjon må avklares.'})
+                'summary':blocked_batch_summary(_analysis_group(variant)),
+                'raw':{'blocked_by_annotations':[row.id for row in selected
+                    if _analysis_group(row)==_analysis_group(variant) and row.id in blocked],
+                    'retryable':any(row.raw.get('_annotation_resolution',{}).get('retryable') is True
+                        for row in selected if _analysis_group(row)==_analysis_group(variant) and row.id in blocked)}})
     last_splice = 0.0
     for group in sorted(grouped):
         variants=grouped[group]
@@ -421,7 +438,8 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                             summary += '\n' + data['genomic_normalization_issue']
                         assessment=data.get('nomenclature_assessment',{})
                         if assessment:summary='Nomenclature: '+assessment['status']+'\n'+assessment.get('reason','')+'\n'+summary
-                        if ((not errors and norm.get('normalized_description')) or
+                        unchanged=normalization_unchanged(v,data) and not v.corrected_hgvs
+                        if not unchanged and ((not errors and norm.get('normalized_description')) or
                                 (assessment.get('identity_confirmed') and data.get('contextual_normalization'))):
                             try:
                                 captured=capture_mutalyzer(data,patient_directory/'Mutalyzer',background=background,
@@ -433,6 +451,8 @@ def run_queue(session: Session, sources: list[str], root: Path, control: QueueCo
                         if applied or retain_confirmed_normalization(v,data,session.tissue_for(v)):
                             status='verified'
                             progress('Mutalyzer: verified normalized name applied')
+                        elif unchanged:
+                            status='verified';summary='Variantnavnet er kontrollert og uendret.'
                         store(v,source,{'status':status,'summary':summary,'raw':data,
                                       'url':'https://mutalyzer.nl/normalizer/'+quote(data.get('original',''),safe='')})
                         if applied:refresh_normalized_plan(v)
