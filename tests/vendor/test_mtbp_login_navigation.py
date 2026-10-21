@@ -159,7 +159,7 @@ def test_one_transient_connection_failure_recovers_before_credentials(monkeypatc
     assert len(page.calls) == 2 and submitted == [True] and context.closed
 
 
-def test_mtbp_waits_beyond_fifteen_seconds_after_one_credential_submission(monkeypatch):
+def test_mtbp_matches_archer_sixty_second_authentication_budget(monkeypatch):
     service = BrowserReviewService(mtbp_email='synthetic@example.org', mtbp_password='synthetic')
     clock = [0.0]
     submitted = []
@@ -168,7 +168,7 @@ def test_mtbp_waits_beyond_fifteen_seconds_after_one_credential_submission(monke
     page.locator = lambda selector: SimpleNamespace(fill=lambda value: None, click=lambda: submitted.append(True))
     page.wait_for_timeout = lambda milliseconds: clock.__setitem__(0, clock[0] + milliseconds / 1000)
     monkeypatch.setattr('solide._vendor.archer.services.browser_review.time.monotonic', lambda: clock[0])
-    monkeypatch.setattr(service, '_session_authenticated', lambda *args: clock[0] >= 20)
+    monkeypatch.setattr(service, '_session_authenticated', lambda *args: clock[0] >= 50)
     monkeypatch.setattr(service, '_login_rejected', lambda *args: False)
     assert service._try_saved_login('MTBP', page)
     assert service.login_credentials_verified and submitted == [True]

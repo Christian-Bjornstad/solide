@@ -4022,7 +4022,7 @@ class BrowserReviewService:
                 page.locator(submit_selector).filter(has_text=re.compile(r"^SIGN IN$", re.I)).click()
             else:
                 page.locator(submit_selector).click()
-            login_timeout = (self.navigation_timeout_ms if database == "MTBP"
+            login_timeout = (max(60_000, self.navigation_timeout_ms) if database == "MTBP"
                              else min(15_000, self.navigation_timeout_ms))
             deadline = time.monotonic() + login_timeout / 1_000
             while time.monotonic() < deadline:

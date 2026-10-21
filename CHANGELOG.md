@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.4 — 21 October 2026
+
+- Match Archer Prosess's 60-second wait after MTBP credential submission.
+- Follow a newly committed main document during SSO redirects instead of waiting
+  for the first document's loader forever. Continue rejecting the previous
+  document, another frame and browser error pages.
+
 ## 0.8.3 — 21 October 2026
 
 - Give MTBP navigation and post-submission authentication the full configured

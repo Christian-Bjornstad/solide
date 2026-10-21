@@ -2,6 +2,31 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## Archer login comparison — 21 October 2026, v0.8.4
+
+Compared the latest Archer Prosess main (249b823) with Solide. Both use the same
+MTBP analysis URL and Keycloak username/password/submit controls. Archer allows
+60 seconds after credential submission; Solide now uses at least that budget
+while retaining cancellable waits and positive authentication checks.
+
+A reproduced Solide-only navigation defect required the initial loader ID even
+after a new SSO document had committed. Navigation now remembers the previous
+document and accepts a new document in the requested main frame. The old page,
+another/missing frame and Chromium error documents remain rejected.
+
+**60 targeted tests passed** for CDP navigation, MTBP login, cancellation and Qt
+worker cleanup/retry. The full suite was not rerun, as requested. A real managed
+Edge comparison passed for both applications against a local synthetic login
+fixture: immediate JavaScript redirect, a delayed navigation acknowledgement,
+visible login form, synthetic credential submission and arrival at the analysis
+input. No real credentials were used in that fixture.
+
+The latest Archer login code was also run against real MTBP in a separate
+background profile on this PC. It returned the same ERR_CONNECTION_TIMED_OUT
+as Solide. The user clarified that Archer had worked on a different PC. These
+are different environments; positive live MTBP login on this PC is still
+unconfirmed. No network/proxy settings or existing browser profiles were changed.
+
 ## MTBP login navigation — 21 October 2026, v0.8.3
 
 The reported failure was reproduced with the unmodified application against
