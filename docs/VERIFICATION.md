@@ -2,6 +2,19 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## Visible database selection and Excel label — 21 October 2026, v0.8.5
+
+**34 targeted tests passed** for database selection, report language/local time,
+the everyday workflow, analysis isolation, SpliceAI visibility and readability.
+The source controls are permanently visible and can select/clear all databases.
+Worker-boundary checks confirm that normal and rerun-all searches receive only
+the checked databases; empty selection launches no worker.
+
+Offscreen Qt screenshots were inspected at 1440×940 and 1050×700. All eight
+checkboxes retain their full geometry; the compact-window page scrolls instead
+of overlapping controls. A fresh production Excel export contains Opprettet
+in A4 and the unchanged local-time date value/format in C4.
+
 ## Archer login comparison — 21 October 2026, v0.8.4
 
 Compared the latest Archer Prosess main (249b823) with Solide. Both use the same

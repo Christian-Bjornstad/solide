@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.5 — 21 October 2026
+
+- Show all database checkboxes directly in Searches, with Select all/Clear all
+  controls and an explicit run-selected-databases button. Keep the search page
+  scrollable on smaller windows so controls do not overlap or disappear.
+- Shorten the Excel creation label to Opprettet, retaining Norwegian local time
+  and the existing date format.
+
 ## 0.8.4 — 21 October 2026
 
 - Match Archer Prosess's 60-second wait after MTBP credential submission.

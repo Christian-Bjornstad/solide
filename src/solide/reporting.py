@@ -915,7 +915,7 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     sheet.sheet_properties.tabColor=VPM_COLORS['navy']
     vpm_title(sheet,f'Solide – {analysis.patient}',13)
     vpm_info_row(sheet,3,'Prøve',analysis.patient,end_column=3)
-    vpm_info_row(sheet,4,'Opprettet (Oslo)',generated,end_column=3);sheet.cell(4,3).number_format=EXCEL_DATETIME_FORMAT
+    vpm_info_row(sheet,4,'Opprettet',generated,end_column=3);sheet.cell(4,3).number_format=EXCEL_DATETIME_FORMAT
     sheet.merge_cells('D3:M4')
     sheet.cell(3,4).alignment=Alignment(vertical='top',wrap_text=True)
     for row in sheet.iter_rows(min_row=3,max_row=4,min_col=4,max_col=13):
