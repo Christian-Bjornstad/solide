@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.3 — 21 October 2026
+
+- Give MTBP navigation and post-submission authentication the full configured
+  timeout instead of stopping after 15 seconds. Wait for the visible trusted
+  login form or a positively authenticated application before proceeding.
+- Recover a navigation timeout when the redirected MTBP document is already
+  usable. Retry a failed login-page GET once without replaying credentials.
+- Return a concise Norwegian connection failure without marking login verified;
+  release the dedicated Edge profile and keep form waits cancellable.
+
 ## 0.8.2 — 20 October 2026
 
 - Use independently verified genomic names for complex OPA variants without

@@ -2,6 +2,36 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## MTBP login navigation — 21 October 2026, v0.8.3
+
+The reported failure was reproduced with the unmodified application against
+the real MTBP site: Page.navigate timed out after exactly 15 seconds, before
+credentials could be entered. A separate Edge navigation with a 45-second
+budget ended with net::ERR_CONNECTION_TIMED_OUT. Independent curl access to
+the same HTTPS endpoint also timed out; the system DNS and a separate public
+resolver returned the same address. These checks establish a connection failure
+from this PC, not a bad password or proof of a worldwide MTBP outage.
+
+The login now uses the configured 45-second navigation/authentication budget,
+waits for the actual visible Keycloak form or positively authenticated MTBP
+input, and inspects a usable redirected document after navigation timeout.
+Only HTTPS on the exact MTBP origin is accepted for this recovery. One retry
+is limited to opening the login page; credential submissions are not replayed.
+The dedicated browser profile is always released and readiness waits can be
+cancelled.
+
+The production live login rerun returned an unconfirmed Norwegian connection
+message after two unsuccessful navigations, retaining ERR_CONNECTION_TIMED_OUT.
+No credentials were submitted or marked verified. Actual positive MTBP login
+could not be confirmed while the endpoint remained unreachable from this PC.
+
+**956 tests passed**, including thirteen provider regressions for slow
+navigation, delayed forms, timed-out but usable pages, transient recovery,
+unreachable service, rejected origins, cancellation and slow authentication.
+A real Qt LoginWorker test verifies failure cleanup and a subsequent successful
+retry against controlled browser responses. Inverting the trusted-origin guard
+was detected by the new tests, and source bytes were restored afterwards.
+
 ## Workstation API recovery — 20 October 2026, v0.8.2
 
 **898 tests passed** in 69.43 seconds. Source compilation and diff checks passed.

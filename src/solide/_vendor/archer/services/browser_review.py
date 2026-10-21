@@ -221,11 +221,14 @@ class BrowserReviewService:
                 self._check_cancelled()
                 pages = context.pages
                 page = pages[0] if pages else context.new_page()
-                page.goto(
-                    self.login_url(database),
-                    wait_until="domcontentloaded",
-                    timeout=min(self.navigation_timeout_ms, 15_000),
-                )
+                if database == "MTBP":
+                    self._navigate_mtbp_login(page)
+                else:
+                    page.goto(
+                        self.login_url(database),
+                        wait_until="domcontentloaded",
+                        timeout=min(self.navigation_timeout_ms, 15_000),
+                    )
                 self._check_cancelled()
                 page.bring_to_front()
                 if self._try_saved_login(database, page):
@@ -245,6 +248,10 @@ class BrowserReviewService:
                     if active_page.url in ('about:blank', 'about:newtab', 'edge://newtab/'):
                         break
                     self._interruptible_page_wait(active_page, 250)
+            except ProviderLookupError as exc:
+                if database != "MTBP":
+                    raise
+                return str(exc)
             except browser_error:
                 pass
             finally:
@@ -253,6 +260,56 @@ class BrowserReviewService:
                 except browser_error:
                     pass
         return f"{database}: Innlogging ikke bekreftet."
+
+
+    def _navigate_mtbp_login(self, page: Any) -> None:
+        """Recover the login GET, never replay a credential submission."""
+        _, browser_error, browser_timeout = self._browser_api()
+        last_error: Exception | None = None
+        for attempt in range(2):
+            self._check_cancelled()
+            try:
+                page.goto(self.login_url("MTBP"), wait_until="domcontentloaded",
+                          timeout=self.navigation_timeout_ms)
+            except (browser_error, browser_timeout) as exc:
+                if not isinstance(exc, browser_timeout) and not _transient_browser_failure(exc):
+                    raise
+                last_error = exc
+            # Page.navigate can time out although the redirected document is
+            # already usable. Inspect the actual trusted page before reloading.
+            if self._wait_for_mtbp_login_page(page):
+                return
+            if attempt == 0:
+                self._interruptible_page_wait(page, 750)
+        reason = ("Ingen forbindelse til innloggingssiden" if last_error else
+                  "Innloggingssiden ble ikke klar")
+        network_code = re.search(r"\bERR_[A-Z_]+\b", str(last_error or ""))
+        detail = f" ({network_code.group(0)})" if network_code else ""
+        raise ProviderLookupError(
+            ProviderFailureKind.TRANSIENT,
+            f"MTBP: {reason} etter to forsøk{detail}. Innlogging ikke bekreftet.",
+            diagnostics={"failure_stage": "login_navigation", "attempts": 2},
+        ) from last_error
+
+    def _wait_for_mtbp_login_page(self, page: Any) -> bool:
+        _, browser_error, browser_timeout = self._browser_api()
+        attempts = max(1, min(5_000, self.navigation_timeout_ms) // 250)
+        for _ in range(attempts):
+            self._check_cancelled()
+            try:
+                address = urlsplit(page.url)
+                if (address.scheme == "https" and address.hostname == "mtbp.org"
+                        and address.port in (None, 443)):
+                    if self._session_authenticated("MTBP", page):
+                        return True
+                    if all(page.locator(selector).count() == 1
+                           and page.locator(selector).is_visible()
+                           for selector in ("#username", "#password", "#kc-login")):
+                        return True
+            except (browser_error, browser_timeout):
+                pass
+            self._interruptible_page_wait(page, 250)
+        return False
 
 
     def search_variants(
@@ -3965,11 +4022,16 @@ class BrowserReviewService:
                 page.locator(submit_selector).filter(has_text=re.compile(r"^SIGN IN$", re.I)).click()
             else:
                 page.locator(submit_selector).click()
-            deadline = time.monotonic() + min(15_000, self.navigation_timeout_ms) / 1_000
+            login_timeout = (self.navigation_timeout_ms if database == "MTBP"
+                             else min(15_000, self.navigation_timeout_ms))
+            deadline = time.monotonic() + login_timeout / 1_000
             while time.monotonic() < deadline:
                 self._check_cancelled()
-                if database == "MTBP" and not self._login_required(database, page.url) and "/analyse" not in page.url:
-                    self._goto_with_retries(page, self.login_url("MTBP"))
+                if database == "MTBP":
+                    address = urlsplit(page.url)
+                    if (address.scheme == "https" and address.hostname == "mtbp.org"
+                            and not self._login_required(database, page.url) and "/analyse" not in address.path):
+                        self._goto_with_retries(page, self.login_url("MTBP"))
                 if self._session_authenticated(database, page):
                     self.login_credentials_verified = True
                     return True
@@ -5228,7 +5290,7 @@ def _transient_browser_failure(exc: Exception) -> bool:
     """Limit automatic query replays to timeouts and recoverable network errors."""
     return isinstance(exc, (TimeoutError, ConnectionError)) or bool(
         re.search(
-            r"\bnet::ERR_(?:CONNECTION_RESET|CONNECTION_CLOSED|CONNECTION_ABORTED|"
+            r"\bnet::ERR_(?:CONNECTION_RESET|CONNECTION_CLOSED|CONNECTION_ABORTED|CONNECTION_TIMED_OUT|"
             r"TIMED_OUT|NETWORK_CHANGED|NAME_NOT_RESOLVED|INTERNET_DISCONNECTED)\b",
             str(exc), re.I,
         )
