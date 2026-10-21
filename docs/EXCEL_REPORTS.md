@@ -102,11 +102,21 @@ uses hg19, basic annotations, distance 500 and masked scores. The 500 bp predict
 window is distinct from the candidate-selection rule. Exonic variants are not
 implicitly assigned an intronic consequence by a different transcript.
 
-Capture the actual website query/settings and every basic transcript's score rows,
-including REF/ALT columns. The page's returned allele, genome, mask, distance,
-transcripts and DS/DP scores must agree with the API response before capture.
-Missing or incompatible images retain the API prediction and expose Missing
-capture for retry. A verified identity is not a clinical splicing classification.
+Capture the actual website query/settings, then one combined native image with
+MANE Select SpliceAI scores, Pangolin scores and Predicted Splicing Consequences
+(SAI-10k-calc). Preserve REF/ALT columns and all returned transcripts in the raw
+API evidence. The screenshot filters only explicit MANE Select annotations, with
+no canonical or MANE Plus Clinical fallback. If several genes have MANE Select
+transcripts, retain each tool's complete MANE set rather than picking the first.
+
+The page's returned allele, genome, mask, distance, complete transcript set and
+DS/DP scores must agree with the SpliceAI API response before filtering. Pangolin
+must separately confirm the same allele/settings and finite scores. Every MANE
+score row and the SAI-10k-calc transcript/output must be visible; an explicit
+source No prediction is valid, while an unavailable predictor is not.
+Missing or incompatible sections retain the API result and expose Missing capture
+for retry. Earlier all-transcript/SpliceAI-only captures are also retriable.
+A verified identity is not a clinical splicing classification.
 
 When SpliceAI is not indicated, Oversikt states **Ikke kjørt**. The ±100 bp
 intronic selection rule is unchanged. The app shows the number of

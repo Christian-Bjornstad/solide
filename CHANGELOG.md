@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6 — 21 October 2026
+
+- Capture only explicitly annotated MANE Select transcript scores, together with
+  Pangolin scores and Predicted Splicing Consequences in one native source image.
+  Keep the query/settings image and full API evidence; scoring settings are unchanged.
+- Verify Pangolin's allele/settings and every visible MANE score row. Missing
+  sections, failed consequence predictions and canonical fallbacks require retry.
+  Older SpliceAI-only images are eligible for Retry failed.
+
 ## 0.8.5 — 21 October 2026
 
 - Show all database checkboxes directly in Searches, with Select all/Clear all

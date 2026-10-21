@@ -1,12 +1,13 @@
 from copy import deepcopy
 import pytest
-from solide.public_capture import spliceai_url, validate_spliceai_capture,validate_mutalyzer_capture,validate_spliceai_dom
+from solide.public_capture import (spliceai_url, validate_spliceai_capture,validate_mutalyzer_capture,
+    validate_spliceai_dom,validate_pangolin_capture)
 
 
 def result():
     row={key:'0.10' for key in ('DS_AG','DS_AL','DS_DG','DS_DL')}
     row.update({key:1 for key in ('DP_AG','DP_AL','DP_DG','DP_DL')})
-    row.update(g_name='PTEN',t_id='ENST1.2',t_refseq_ids=['NM_000314.8'])
+    row.update(g_name='PTEN',t_id='ENST1.2',t_priority='MS',t_refseq_ids=['NM_000314.8'])
     response=dict(variant='chr10-89692769-G-A',hg='37',genomeVersion='37',distance=500,mask=1,
                   chrom='10',pos=89692769,ref='G',alt='A',scores=[row],bc='basic')
     return dict(query=response['variant'],hg=37,distance=500,mask=1,response=response)
@@ -25,6 +26,7 @@ def test_capture_url_uses_exact_api_variant_and_interpretation_settings():
     lambda r:r.update(mask=0),lambda r:r.update(hg=38),lambda r:r.update(variant='chr10-89692769-G-T'),
     lambda r:r['scores'][0].update(DS_AG='0.99'),lambda r:r['scores'][0].update(t_id='OTHER'),
     lambda r:r.update(scores=[]),lambda r:r.update(bc='comprehensive'),
+    lambda r:r['scores'][0].update(t_priority='C'),
 ])
 def test_browser_capture_must_match_validated_api_identity_settings_and_scores(change):
     data=result();browser=deepcopy(data['response']);change(browser)
@@ -103,9 +105,77 @@ def test_legacy_mtbp_gene_rows_are_rechecked_without_mutating_saved_result():
     assert assess_evidence(v,e,session).label=='No match'
 
 
-def test_spliceai_dom_requires_query_settings_and_all_visible_transcript_rows():
-    state={'input':'chr10-89692769-G-A','hg':'37','bc':'basic','distance':'500',
-           'mask':True,'ref_alt':True,'visible_rows':4,'table_visible':True}
-    validate_spliceai_dom(result(),state)
-    for field,value in [('hg','38'),('mask',False),('ref_alt',False),('visible_rows',0),('table_visible',False)]:
-        with pytest.raises(ValueError):validate_spliceai_dom(result(),{**state,field:value})
+def mane_state():
+    return {'input':'chr10-89692769-G-A','hg':'37','bc':'basic','distance':'500',
+        'mask':True,'ref_alt':True,
+        'panels':{'spliceai':{'visible':True,'transcripts':['ENST1.2']*4},
+                  'pangolin':{'visible':True,'transcripts':['ENST1.2']*2},
+                  'consequences':{'visible':True,'transcripts':['ENST1.2'],
+                      'method':'SAI-10k-calc','output':'No prediction'}}}
+
+
+def complete_result():
+    data=result()
+    data['response']['sai10kPredictions']={'transcript_id':'ENST1.2','aberrations':[]}
+    data['pangolin_response']={**deepcopy(data['response']),'mask':'True',
+        'scores':[{'t_id':'ENST1.2','t_priority':'MS','DS_SL':'-0.89','DS_SG':'0.19','DP_SL':-2,'DP_SG':-62}]}
+    return data
+
+
+def test_spliceai_dom_requires_mane_only_and_all_three_complete_panels():
+    data=complete_result();state=mane_state()
+    # Keep the full API evidence, but hide every non-MANE transcript in the picture.
+    other=deepcopy(data['response']['scores'][0]);other.update(t_id='ENST2.1',t_priority='MP')
+    data['response']['scores'].append(other)
+    validate_spliceai_dom(data,state)
+    for field,value in [('hg','38'),('mask',False),('ref_alt',False)]:
+        with pytest.raises(ValueError):validate_spliceai_dom(data,{**state,field:value})
+    for panel in state['panels']:
+        for key,value in [('visible',False),('transcripts',[]),('transcripts',['ENST2.1'])]:
+            changed=deepcopy(state);changed['panels'][panel][key]=value
+            with pytest.raises(ValueError):validate_spliceai_dom(data,changed)
+    for output in ('','Loading...'):
+        changed=deepcopy(state);changed['panels']['consequences']['output']=output
+        with pytest.raises(ValueError):validate_spliceai_dom(data,changed)
+
+
+def test_mane_capture_does_not_fall_back_to_canonical_or_another_prediction_transcript():
+    data=complete_result();data['response']['scores'][0]['t_priority']='C'
+    with pytest.raises(ValueError,match='MANE'):validate_spliceai_dom(data,mane_state())
+    data=complete_result();data['response']['sai10kPredictions']['transcript_id']='ENST2.1'
+    with pytest.raises(ValueError):validate_spliceai_dom(data,mane_state())
+    data=complete_result();data['response']['sai10kPredictionsError']='Service failed'
+    with pytest.raises(ValueError):validate_spliceai_dom(data,mane_state())
+
+
+@pytest.mark.parametrize('mutation',[
+    {'variant':'chr10-89692769-G-T'},{'pos':89692770},{'hg':'38'},{'distance':10000},
+    {'mask':0},{'bc':'comprehensive'},{'error':'Unavailable'},{'scores':[]},
+    {'scores':[{'t_id':'ENST1.2','t_priority':'MS','DS_SL':'nan','DS_SG':0,'DP_SL':0,'DP_SG':0}]},
+])
+def test_pangolin_must_confirm_same_allele_settings_and_finite_scores(mutation):
+    data=complete_result();validate_pangolin_capture(data,data['pangolin_response'])
+    with pytest.raises(ValueError):validate_pangolin_capture(data,{**data['pangolin_response'],**mutation})
+
+
+def test_mane_dom_handles_multiple_mane_transcripts_without_selecting_first_gene():
+    data=complete_result();state=mane_state()
+    for key in ('response','pangolin_response'):
+        other=deepcopy(data[key]['scores'][0]);other['t_id']='ENST3.1'
+        data[key]['scores'].append(other)
+    state['panels']['spliceai']['transcripts']+=['ENST3.1']*4
+    state['panels']['pangolin']['transcripts']+=['ENST3.1']*2
+    validate_spliceai_dom(data,state)
+
+
+def test_old_spliceai_picture_and_incomplete_panels_are_retriable(tmp_path):
+    from test_report_source_sequence import full_results
+    from solide.evidence import assess_evidence,build_search_plan
+    session,v=full_results(tmp_path);item=v.evidence['SpliceAI'];capture=item['raw']['capture']
+    assert assess_evidence(v,item,session).label=='Verified match'
+    del capture['capture_version']
+    assert assess_evidence(v,item,session).label=='Missing capture'
+    assert (v.id,'SpliceAI') in build_search_plan(session,['SpliceAI'],'failed')
+    capture['capture_version']=2
+    capture['panels']['pangolin']['visible']=False
+    assert assess_evidence(v,item,session).label=='Missing capture'

@@ -2,6 +2,31 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## MANE Select SpliceAI capture — 21 October 2026, v0.8.6
+
+**71 targeted tests passed** for source capture, search/retry behavior, report
+source order, SpliceAI visibility and clean Excel export. Regressions reject
+wrong allele/assembly/settings, altered MANE annotations, non-finite Pangolin
+scores, extra/missing transcript rows, missing panels, prediction errors and
+canonical fallback. Multiple MANE transcripts remain visible. Earlier captures
+without Pangolin/consequences enter Retry failed without losing API evidence.
+The full suite was not rerun, following the user's earlier instruction.
+
+A live managed Edge run used the public NF1 example NM_001042492.3:c.6147+2T>A
+(hg19 chr17:29663493 T>A) from the supplied reference image. The full six-row
+SpliceAI API response matched the page before filtering. The resulting native
+image contains exactly four SpliceAI and two Pangolin score rows for MANE Select
+ENST00000358273.9_12, followed by its SAI-10k-calc consequence. Other transcripts
+and unrelated predictor sections are excluded. Existing masked/500 bp/REF-ALT
+settings remain unchanged; predictions are not edited to match a reference image.
+
+The production Excel export has two embedded images: the verified query/settings
+and the combined three-section panel. The image extracted from the workbook was
+visually inspected, including the last consequence row. Native Microsoft Excel
+opened the report read-only without repair and confirmed both images; its file
+hash was unchanged. Tests used isolated background Edge profiles and Qt offscreen.
+MTBP was not queried during this change because the user reported it unavailable.
+
 ## Visible database selection and Excel label — 21 October 2026, v0.8.5
 
 **34 targeted tests passed** for database selection, report language/local time,

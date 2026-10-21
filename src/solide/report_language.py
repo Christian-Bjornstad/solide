@@ -34,6 +34,7 @@ TEXT={
     'Mutalyzer · input and normalized name':'Mutalyzer · opprinnelig og normalisert navn',
     'SpliceAI query · hg19 · ±500 bp · masked · REF/ALT':'SpliceAI-spørring · hg19 · ±500 bp · maskert · REF/ALT',
     'SpliceAI transcript scores · all basic transcripts':'SpliceAI-skårer · alle basic-transkripter',
+    'SpliceAI, Pangolin and predicted splicing consequences · MANE Select':'SpliceAI, Pangolin og spleisekonsekvenser · MANE Select',
     'BRCA Exchange · variant identity and ENIGMA classification':'BRCA Exchange · variant og ENIGMA-klassifikasjon',
 }
 

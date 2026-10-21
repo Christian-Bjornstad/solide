@@ -119,9 +119,13 @@ def assess_evidence(v, evidence, session):
             if source=='SpliceAI':
                 capture=raw.get('capture',{})
                 if (capture.get('score_identity_confirmed') is not True or capture.get('dom_identity_confirmed') is not True
+                        or capture.get('capture_version')!=2 or not capture.get('mane_transcripts')
+                        or any(not capture.get('panels',{}).get(panel,{}).get('visible')
+                            or not capture.get('panels',{}).get(panel,{}).get('transcripts')
+                            for panel in ('spliceai','pangolin','consequences'))
                         or capture.get('query')!=raw.get('query') or len(raw.get('screenshots',[]))!=2
                         or capture.get('settings')!={'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True}):
-                    return EvidenceAssessment('Missing capture','Recapture the verified query/settings and complete transcript scores.',True)
+                    return EvidenceAssessment('Missing capture','Recapture MANE Select scores, Pangolin and predicted splicing consequences.',True)
             if source=='MTBP' and not valid_capture(raw.get('patient_report_screenshot','')):
                 return EvidenceAssessment('Missing capture','Full MTBP report screenshot is missing.',True)
         if raw.get('query_basis')=='gene_cdna':

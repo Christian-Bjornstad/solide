@@ -25,6 +25,8 @@ def full_results(tmp_path):
             **dict.fromkeys(('DP_AG','DP_AL','DP_DG','DP_DL'),0)}]},
         screenshots=[{'path':str(image),'label':'Query'},{'path':str(image),'label':'Scores'}],
         capture={'query':query,'score_identity_confirmed':True,'dom_identity_confirmed':True,
+            'capture_version':2,'mane_transcripts':['ENST1.2'],
+            'panels':{key:{'visible':True,'transcripts':['ENST1.2']} for key in ('spliceai','pangolin','consequences')},
             'settings':{'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True}})
     return session,v
 

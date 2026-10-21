@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import time
 import re
+import math
+from collections import Counter
 from urllib.parse import urlencode,quote,urlsplit
 
 from .nomenclature import validate_spliceai_response
@@ -123,24 +125,113 @@ def validate_spliceai_capture(data:dict,browser:dict)->None:
     def signature(response):
         return sorted((str(row.get('g_name') or row.get('gene_name') or row.get('symbol') or ''),
                        str(row.get('t_id') or row.get('transcript_id') or ''),
+                       str(row.get('t_priority') or ''),
                        tuple(sorted(row.get('t_refseq_ids') or [])),
                        tuple(float(row[key]) for key in _SCORES)) for row in response['scores'])
     if not browser['scores'] or signature(browser)!=signature(data['response']):
         raise ValueError('SpliceAI page scores or transcripts differ from the validated response. Capture again.')
 
 
+def _mane_ids(response:dict)->list[str]:
+    ids=[row['t_id'] for row in response.get('scores',[]) if row.get('t_priority')=='MS' and row.get('t_id')]
+    if not ids:raise ValueError('MANE Select transcript is unavailable; capture requires source review.')
+    return sorted(set(ids))
+
+
+def validate_pangolin_capture(data:dict,response:dict)->None:
+    """Pangolin is a separate model: check its allele and settings, not SpliceAI scores."""
+    reference=data['response']
+    variants={data['query'].removeprefix('chr'),
+              validate_spliceai_response(reference,data['query']).removeprefix('chr')}
+    if (not isinstance(response,dict) or response.get('error') or response.get('errors')
+            or response.get('variant','').removeprefix('chr') not in variants
+            or any(str(response.get(key))!='37' for key in ('hg','genomeVersion'))
+            or response.get('bc')!='basic' or response.get('distance')!=500
+            or str(response.get('mask')).lower() not in {'1','true'}
+            or any(response.get(key)!=reference.get(key) for key in ('chrom','pos','ref','alt'))):
+        raise ValueError('Pangolin did not confirm the requested allele and hg19 settings.')
+    _mane_ids(response)
+    for row in response['scores']:
+        try:
+            scores=[float(row[key]) for key in ('DS_SL','DS_SG')]
+            positions=[float(row[key]) for key in ('DP_SL','DP_SG')]
+        except (KeyError,TypeError,ValueError):
+            raise ValueError('Pangolin prediction scores are incomplete.') from None
+        if (any(not math.isfinite(v) or abs(v)>1 for v in scores)
+                or any(not math.isfinite(v) or not v.is_integer() for v in positions)):
+            raise ValueError('Pangolin prediction scores are invalid.')
+
+
 def validate_spliceai_dom(data:dict,state:dict)->None:
     if (state.get('input')!=data['query'] or state.get('hg')!='37' or state.get('bc')!='basic'
-            or state.get('distance')!='500' or state.get('mask') is not True or state.get('ref_alt') is not True
-            or not state.get('table_visible') or state.get('visible_rows')!=4*len(data['response']['scores'])):
-        raise ValueError('SpliceAI rendered settings or complete transcript rows are unavailable. Capture again.')
+            or state.get('distance')!='500' or state.get('mask') is not True or state.get('ref_alt') is not True):
+        raise ValueError('SpliceAI rendered query/settings are unavailable. Capture again.')
+    for key,response,rows in [('spliceai',data['response'],4),('pangolin',data['pangolin_response'],2)]:
+        panel=state.get('panels',{}).get(key,{})
+        expected=Counter({transcript:rows for transcript in _mane_ids(response)})
+        if not panel.get('visible') or Counter(panel.get('transcripts',[]))!=expected:
+            raise ValueError(f'{key}: complete MANE Select scores are unavailable. Capture again.')
+    prediction=data['response'].get('sai10kPredictions') or {}
+    panel=state.get('panels',{}).get('consequences',{})
+    transcript=prediction.get('transcript_id')
+    output=panel.get('output','').strip()
+    if (data['response'].get('sai10kPredictionsError') or not isinstance(prediction.get('aberrations'),list)
+            or transcript not in _mane_ids(data['response']) or not panel.get('visible')
+            or panel.get('transcripts')!=[transcript] or panel.get('method')!='SAI-10k-calc'
+            or not output or output.lower().startswith(('loading','error'))
+            or (not prediction['aberrations'] and output!='No prediction')
+            or (prediction['aberrations'] and output=='No prediction')):
+        raise ValueError('MANE Select predicted splicing consequences are unavailable. Capture again.')
+
+
+# The site's "main" button also admits MANE Plus Clinical/canonical fallbacks.
+# Restrict native rows to explicit MS annotations without changing source scores.
+# Continuation rows inherit the transcript of their rowspan cell.
+_SPLICEAI_MANE_PANELS_JS="""() => {
+    document.querySelector('#main-transcript-button')?.click();
+    // A minimized managed window can ignore --window-size. Give the native
+    // panels enough layout width to keep transcript names and outputs readable.
+    const results=document.querySelector('#response-box');
+    if(results)results.style.minWidth='2600px';
+    const panel=(id,response,rowClass)=>{
+        const table=document.getElementById(id),transcripts=[];
+        const ids=new Set((response?.scores||[]).filter(s=>s.t_priority==='MS').map(s=>s.t_id));
+        let transcript=null;
+        for(const row of table?.querySelectorAll(rowClass)||[]){
+            const link=row.querySelector('a[href*="/Transcript/Summary?"]');
+            if(link)transcript=link.textContent.trim();
+            row.style.display=ids.has(transcript)?'':'none';
+            if(row.getBoundingClientRect().height>0)transcripts.push(transcript);
+        }
+        return {visible:!!table?.getBoundingClientRect().height,transcripts};
+    };
+    const spliceai=panel('spliceai-table',lastSpliceaiResponseJson,'.spliceai-result-row');
+    const pangolin=panel('pangolin-table',lastPangolinResponseJson,'.pangolin-result-row');
+    const table=document.getElementById('sai10k-table');
+    const rows=[...(table?.querySelectorAll('tr')||[])].filter(r=>r.querySelector('td') && r.getBoundingClientRect().height>0);
+    const consequences={visible:!!table?.getBoundingClientRect().height,
+        transcripts:rows.map(r=>r.querySelector('a[href*="/Transcript/Summary?"]')?.textContent.trim()),
+        method:rows[0]?.cells[1]?.innerText.trim().split(/\\s+/)[0]||'',output:rows[0]?.cells[2]?.innerText.trim()||''};
+    const boxes=['spliceai-table','pangolin-table','sai10k-table'].map(id=>document.getElementById(id)?.getBoundingClientRect());
+    const clip=boxes.every(b=>b?.width>0 && b?.height>0)?{
+        x:Math.min(...boxes.map(b=>b.left)),y:boxes[0].top,
+        width:Math.max(...boxes.map(b=>b.right))-Math.min(...boxes.map(b=>b.left)),
+        height:boxes[2].bottom-boxes[0].top}:null;
+    return {input:document.querySelector('#search-box')?.value,
+        hg:document.querySelector('input[name="hg"]:checked')?.value,
+        bc:document.querySelector('input[name="gencode-gene-set"]:checked')?.value,
+        distance:document.querySelector('#max-distance-input')?.value,
+        mask:document.querySelector('input[name="mask"]')?.checked,
+        ref_alt:document.querySelector('input[name="show-ref-alt"]')?.checked,
+        panels:{spliceai,pangolin,consequences},clip};
+}"""
 
 
 def capture_spliceai(data:dict,directory:Path,*,background=True,checkpoint=lambda:None,progress=lambda text:None)->dict:
-    """Capture the live form/settings and all transcript scores, excluding other tools."""
+    """Capture native MANE Select SpliceAI, Pangolin and splicing consequences."""
     url=spliceai_url(data);directory=Path(directory);directory.mkdir(parents=True,exist_ok=True)
     stem=hashlib.sha256(data['query'].encode()).hexdigest()[:16]
-    progress('SpliceAI: capturing validated transcript scores')
+    progress('SpliceAI: capturing MANE Select, Pangolin and splicing consequences')
     with sync_edge_cdp() as runtime:
         context=runtime.chromium.launch_persistent_context(str(Path.home()/'.solide'/'browser_profiles'/'SpliceAI'),
             background=background,viewport={'width':1600,'height':1000})
@@ -150,6 +241,7 @@ def capture_spliceai(data:dict,directory:Path,*,background=True,checkpoint=lambd
             checkpoint()
             state=page.evaluate("""() => ({input:document.querySelector('#search-box')?.value,
                 response:typeof lastSpliceaiResponseJson==='undefined'?null:lastSpliceaiResponseJson,
+                pangolin:typeof lastPangolinResponseJson==='undefined'?null:lastPangolinResponseJson,
                 rows:document.querySelectorAll('#spliceai-table .spliceai-result-row').length,
                 visible:!!document.querySelector('#spliceai-table')?.getBoundingClientRect().height})""")
             if state.get('response') and state.get('rows') and state.get('visible'):break
@@ -157,19 +249,10 @@ def capture_spliceai(data:dict,directory:Path,*,background=True,checkpoint=lambd
         if state.get('input')!=data['query'] or not state.get('response'):
             raise ValueError('SpliceAI page did not finish the requested variant; screenshot unavailable.')
         validate_spliceai_capture(data,state['response'])
-        # All basic-annotation transcripts remain visible; do not silently choose
-        # the first gene or discard a non-MANE transcript from the evidence.
-        page.evaluate("""() => document.querySelector('#all-transcript-button')?.click()""")
-        visible=page.evaluate("""() => ({input:document.querySelector('#search-box')?.value,
-            hg:document.querySelector('input[name="hg"]:checked')?.value,
-            bc:document.querySelector('input[name="gencode-gene-set"]:checked')?.value,
-            distance:document.querySelector('#max-distance-input')?.value,
-            mask:document.querySelector('input[name="mask"]')?.checked,
-            ref_alt:document.querySelector('input[name="show-ref-alt"]')?.checked,
-            table_visible:!!document.querySelector('#spliceai-table')?.getBoundingClientRect().height,
-            visible_rows:[...document.querySelectorAll('#spliceai-table .spliceai-result-row')]
-                .filter(el=>el.getBoundingClientRect().height>0).length})""")
-        validate_spliceai_dom(data,visible)
+        validate_pangolin_capture(data,state.get('pangolin'))
+        captured_data={**data,'response':state['response'],'pangolin_response':state['pangolin']}
+        visible=page.evaluate(_SPLICEAI_MANE_PANELS_JS)
+        validate_spliceai_dom(captured_data,visible)
         specs=[]
         form=page.locator('#search-box').evaluate("""el => {
             const form=el.closest('.ui.form');if(!form)return null;
@@ -182,14 +265,20 @@ def capture_spliceai(data:dict,directory:Path,*,background=True,checkpoint=lambd
             raise ValueError('SpliceAI query/settings panel is unavailable. Capture again.')
         path=directory/f'{stem}-spliceai-query.png';page.screenshot(path=str(path),clip=form)
         specs.append({'path':str(path),'label':'SpliceAI query · hg19 · ±500 bp · masked · REF/ALT'})
-        path=directory/f'{stem}-spliceai-scores.png';page.locator('#spliceai-table').screenshot(path=str(path))
-        specs.append({'path':str(path),'label':'SpliceAI transcript scores · all basic transcripts'})
+        clip=visible.get('clip')
+        if not clip or clip['width']<=0 or clip['height']<=0:
+            raise ValueError('SpliceAI/Pangolin/consequences screenshot geometry is unavailable.')
+        path=directory/f'{stem}-spliceai-scores.png';page.screenshot(path=str(path),clip=clip)
+        specs.append({'path':str(path),'label':'SpliceAI, Pangolin and predicted splicing consequences · MANE Select'})
         for record in specs:
             if not validate_capture(Path(record['path'])).valid:
                 raise ValueError('SpliceAI screenshot is unreadable; capture again.')
         metadata={'url':url,'captured_at':datetime.now(timezone.utc).isoformat(),
                   'query':data['query'],'settings':{'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True},
                   'score_identity_confirmed':True,'dom_identity_confirmed':True,'transcripts':len(state['response']['scores']),
+                  'capture_version':2,'mane_transcripts':_mane_ids(state['response']),
+                  'panels':visible['panels'],'pangolin_response':state['pangolin'],
+                  'splicing_predictions':state['response']['sai10kPredictions'],
                   'screenshots':specs}
         (directory/f'{stem}-spliceai.capture.json').write_text(json.dumps(metadata,indent=2),encoding='utf8')
         return metadata
