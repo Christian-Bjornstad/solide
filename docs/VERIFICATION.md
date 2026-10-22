@@ -2,6 +2,50 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## Rendered OncoKB results and capture recovery — 22 October 2026, v0.8.8
+
+The next supplied workbook contained ten selected interpretations and 186 source
+images. Four OncoKB searches lost their source answer when native-panel capture
+timed out. The exact blocked resource/layout state was absent from those error
+records. All ten searches succeeded with complete source images in a new live
+production-provider run using the already authenticated, isolated test profile.
+The source assertions included Unknown Oncogenic Effect and Inconclusive; these
+are valid source answers, not search failures.
+
+A local managed Edge fixture reproduced an overstrict readiness dependency:
+an unrelated pending image and footer font kept the document interactive and its
+font set loading even though the source panels were visible and stable. The old
+global readiness gate could never capture them. Both OncoKB and ClinVar now pass
+this fixture while still requiring their source labels and stable bounds before
+and after screenshot capture. This reproduces the failure mechanism, not the
+unrecorded network conditions on the reporting workstation.
+
+Capture-only failures preserve the parsed source answer, omit image references,
+retain layout diagnostics and remain retryable. Regressions cover source/variant
+changes, login expiry during capture, classification retention in Kilder, and
+independently confirmed classifications with Bilde mangler in the overview.
+The missing COSMIC-ID text is shortened in both provider responses and Excel.
+
+**194 targeted tests passed:** 169 source/report/workflow tests, 23 relevant
+Archer-parity checks and two opt-in background managed Edge tests. The full suite
+was not rerun. Source compilation and diff checks passed.
+
+The report audit also checked ten Mutalyzer results, ten Franklin results, eight
+ClinVar matches, three COSMIC matches, two BRCA Exchange matches and the single
+applicable MANE Select SpliceAI/Pangolin/consequence image. The two ClinVar no-hits
+were checked against the six returned VCV records: other alternate alleles or
+overlapping indels must not be imported as the requested substitution. No
+identity checks were weakened to convert these no-hits into matches.
+
+A production Excel test export combined the ten fresh OncoKB results with the
+other source evidence embedded in the supplied report. It contained 190 source
+images and explicit result cells. A separately verified Excel instance opened
+it read-only without repair; the source images and native overview PDF were
+visually inspected. The original workbook SHA256 was unchanged. No existing
+Excel window, user browser profile or MTBP service was operated. Other database
+results in this export were reviewed and preserved, not represented as new live
+searches. Fresh OncoKB sign-in on another workstation remains unverified.
+
 ## OncoKB genomic identity and explicit report cells — 22 October 2026, v0.8.7
 
 Inspected the supplied workbook read-only: seven selected variant sheets, 42

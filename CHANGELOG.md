@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.8 — 22 October 2026
+
+- Capture rendered OncoKB and ClinVar result panels without waiting for unrelated
+  document resources or fonts. Required source labels and stable panel geometry
+  are still checked before and after capture.
+- Retain the matched OncoKB answer when only its screenshot fails, keep that
+  search eligible for retry, and record layout diagnostics. Discard the image
+  and old classification if the returned variant changes during capture.
+- Shorten the missing COSMIC identifier message to `COSMIC-ID mangler` in the
+  provider response and Excel cells.
+
 ## 0.8.7 — 22 October 2026
 
 - Accept OncoKB's canonical splice/protein labels when its returned genomic

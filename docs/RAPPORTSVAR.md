@@ -5,6 +5,9 @@ Ved treff vises databasens egen vurdering, for eksempel `Likely Oncogenic`,
 ikke. Databasene kan endre og utvide vurderingene sine; dette er ikke en fast liste.
 OncoKBs eget proteinnavn kan være forskjellig fra TSV-transkriptets navn når samme
 genomiske variant er bekreftet. Originale variantopplysninger beholdes.
+En feil ved bildetaking sletter ikke det innleste OncoKB-svaret fra Kilder.
+Uavhengig bekreftede klassifikasjoner kan fortsatt vises med «Bilde mangler»;
+ellers viser oversikten «Bilde mangler» frem til kildebildet kan hentes på nytt.
 
 ## Gjennomført søk og kildevurderinger
 
@@ -29,7 +32,7 @@ genomiske variant er bekreftet. Originale variantopplysninger beholdes.
 |---|---|
 | Tom celle | Ingen registrert søking i denne databasen. |
 | Ikke kjørt | SpliceAI er ikke aktuelt etter utvalgsregelen for intronvarianter. |
-| Ikke søkt – COSMIC-ID mangler | Raden mangler COSM-/COSV-ID. Dette er ikke et gjennomført søk uten treff. |
+| COSMIC-ID mangler | Raden mangler COSM-/COSV-ID. Dette er ikke et gjennomført søk uten treff. |
 | Ikke aktuelt | Kilden gjelder ikke den valgte varianten. |
 | Søket er utsatt | Kilden har utsatt oppslaget. |
 | Manuelt søk kreves | Kilden krever manuelt oppslag. |

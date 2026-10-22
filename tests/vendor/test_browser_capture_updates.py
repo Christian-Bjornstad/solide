@@ -123,6 +123,58 @@ def test_oncokb_visible_page_parser_extracts_core_evidence_for_requested_synthet
     assert "mutation_effect=Gain-of-function" in evidence.summary
 
 
+def test_oncokb_capture_failure_retains_source_answer_without_publishing_old_image(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    body = 'TP53 R175H Somatic\nVariant Overview\nNot specifically reviewed.\nMutation Effect\nOncogenicity\nUnknown Oncogenic Effect'
+    page = SimpleNamespace(url='https://www.oncokb.org/gene/TP53/somatic/R175H',
+        locator=lambda _: SimpleNamespace(inner_text=lambda **_: body))
+    service = BrowserReviewService(profile_root=tmp_path)
+    monkeypatch.setattr(browser_review, 'dismiss_known_overlays', lambda _: None)
+    monkeypatch.setattr(service, '_reject_oncokb_cookies', lambda _: None)
+    def failed_capture(*args, **kwargs):
+        raise TimeoutError('Result layout did not settle')
+    monkeypatch.setattr(browser_review, 'capture_source_panel', failed_capture)
+    evidence = service._capture_result('OncoKB', synthetic_variant(), page, tmp_path)
+    assert evidence.status == 'found'
+    assert evidence.clinical_significance == 'Unknown Oncogenic Effect'
+    assert evidence.raw['failure_stage'] == 'summary_capture'
+    assert evidence.raw['capture_issue'] == 'Result layout did not settle'
+    assert not evidence.raw.get('screenshots') and not evidence.raw.get('screenshot')
+    assert evidence.raw['captured_at']
+    from solide._vendor.archer.services.evidence_audit import is_completed_evidence
+    assert not is_completed_evidence(evidence)
+
+
+def test_oncokb_variant_change_during_capture_discards_both_image_and_old_answer(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    bodies = iter(['TP53 R175H Somatic\nVariant Overview\nMutation Effect\nOncogenicity\nOncogenic',
+                   'BRAF V600E Somatic\nVariant Overview\nMutation Effect\nOncogenicity\nOncogenic'])
+    page = SimpleNamespace(url='https://www.oncokb.org/gene/TP53/somatic/R175H',
+        locator=lambda _: SimpleNamespace(inner_text=lambda **_: next(bodies)))
+    service = BrowserReviewService(profile_root=tmp_path)
+    monkeypatch.setattr(browser_review, 'dismiss_known_overlays', lambda _: None)
+    monkeypatch.setattr(service, '_reject_oncokb_cookies', lambda _: None)
+    monkeypatch.setattr(browser_review, 'capture_source_panel', lambda *args, **kwargs: None)
+    evidence = service._capture_result('OncoKB', synthetic_variant(), page, tmp_path)
+    assert evidence.status == 'identity_mismatch'
+    assert not evidence.clinical_significance and not evidence.raw['screenshots']
+
+
+def test_oncokb_login_expiry_during_capture_never_publishes_a_source_answer(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    body='TP53 R175H Somatic\nVariant Overview\nMutation Effect\nOncogenicity\nOncogenic'
+    page=SimpleNamespace(url='https://www.oncokb.org/gene/TP53/somatic/R175H',
+        locator=lambda _:SimpleNamespace(inner_text=lambda **_:body))
+    service=BrowserReviewService(profile_root=tmp_path)
+    monkeypatch.setattr(browser_review,'dismiss_known_overlays',lambda _:None)
+    monkeypatch.setattr(service,'_reject_oncokb_cookies',lambda _:None)
+    monkeypatch.setattr(browser_review,'capture_source_panel',
+        lambda *args,**kwargs:setattr(page,'url','https://www.oncokb.org/login'))
+    evidence=service._capture_result('OncoKB',synthetic_variant(),page,tmp_path)
+    assert evidence.status=='login_required'
+    assert not evidence.clinical_significance and not evidence.raw['screenshots']
+
+
 def test_oncokb_queries_add_documented_grch37_hgvsg_fallback():
     variant = synthetic_variant()
 

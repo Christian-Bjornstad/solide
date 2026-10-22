@@ -120,6 +120,8 @@ class EvidenceAuditIndex:
 
 
 def is_completed_evidence(evidence: DatabaseEvidence) -> bool:
+    if evidence.status == 'found' and evidence.raw.get('capture_issue'):
+        return False
     analysis_id = str(evidence.raw.get("analysis_id") or "")
     if (
         evidence.database == "MTBP"

@@ -1,4 +1,6 @@
-from solide._vendor.archer.services.source_panel_capture import capture_source_panel
+import pytest
+
+from solide._vendor.archer.services.source_panel_capture import capture_source_panel, SourcePanelCaptureTimeout
 
 
 def test_capture_retries_when_late_layout_changes_between_measurement_and_screenshot(tmp_path):
@@ -29,3 +31,18 @@ def test_capture_waits_for_all_expected_classification_sections(tmp_path):
     capture_source_panel(page,tmp_path/'capture.png','test',timeout_ms=1000,
         required_text=['Germline','Clinical impact','Oncogenicity'])
     assert page.captured_at>=6
+
+
+def test_capture_timeout_keeps_layout_diagnostics_without_source_text(tmp_path):
+    class Page:
+        def evaluate(self, script):
+            return {'ready': True, 'clip': None, 'document_state': 'interactive',
+                    'font_state': 'loading', 'text': 'private source details'}
+        def wait_for_timeout(self, ms):
+            pass
+    with pytest.raises(SourcePanelCaptureTimeout) as failure:
+        capture_source_panel(Page(), tmp_path/'capture.png', 'test', timeout_ms=5,
+                             required_text=['Oncogenic'])
+    assert failure.value.diagnostics['last_state']['clip'] is None
+    assert failure.value.diagnostics['required_text_present'] == [False]
+    assert 'private source details' not in str(failure.value.diagnostics)

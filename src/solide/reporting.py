@@ -834,7 +834,7 @@ def _vpm_compact(variant,source,scoped):
     assessment=assess_evidence(variant,item,scoped).label
     if assessment=='Not applicable':
         if source=='SpliceAI':return 'Ikke kjørt'
-        if source=='COSMIC' and 'COSMIC-ID' in item.get('summary',''):return 'Ikke søkt – COSMIC-ID mangler'
+        if source=='COSMIC' and 'COSMIC-ID' in item.get('summary',''):return 'COSMIC-ID mangler'
         return 'Ikke aktuelt'
     if assessment=='No match':
         if source=='OncoKB' and 'no information for gene' in item.get('summary',''):

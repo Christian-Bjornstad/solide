@@ -695,7 +695,7 @@ class BrowserReviewService:
             self.variant_key(variant): DatabaseEvidence(
                 "COSMIC",
                 "not_applicable",
-                "ingen COSMIC-ID",
+                "COSMIC-ID mangler",
                 accession=variant.cosmic_id,
                 raw={
                     "failure_kind": ProviderFailureKind.NOT_FOUND.value,
@@ -787,7 +787,7 @@ class BrowserReviewService:
             return DatabaseEvidence(
                 "COSMIC",
                 "not_applicable",
-                "ingen COSMIC-ID",
+                "COSMIC-ID mangler",
                 accession=variant.cosmic_id,
                 raw={
                     "failure_kind": ProviderFailureKind.NOT_FOUND.value,
@@ -2874,6 +2874,7 @@ class BrowserReviewService:
                 accession=_review_query(variant),
                 url=current_url,
             )
+        capture_failure = {}
         if database == "Franklin":
             screenshots = self._capture_franklin_computed_pages(
                 page, variant, artifact_directory
@@ -2891,27 +2892,53 @@ class BrowserReviewService:
             screenshot_path = self._screenshot_path(
                 artifact_directory, database, variant
             )
-            if database=='OncoKB' and parse_oncokb_page(body_text,variant,current_url).status=='found':
-                capture_source_panel(page,screenshot_path,ONCOKB_PANEL_JS,
-                    timeout_ms=self.navigation_timeout_ms,checkpoint=self._check_cancelled)
-            else:page.screenshot(path=str(screenshot_path), full_page=False)
+            if database == 'OncoKB' and parse_oncokb_page(body_text, variant, current_url).status == 'found':
+                parsed = parse_oncokb_page(body_text, variant, current_url)
+                try:
+                    capture_source_panel(page, screenshot_path, ONCOKB_PANEL_JS,
+                        timeout_ms=self.navigation_timeout_ms, checkpoint=self._check_cancelled,
+                        required_text=tuple(filter(None, (parsed.clinical_significance,
+                                                         parsed.raw.get('biological_effect')))))
+                except Exception as exc:
+                    # The source answer and image are separate outcomes. Do not
+                    # discard a matched answer or publish an old/partial image.
+                    capture_failure = {'capture_issue': str(exc), 'failure_stage': 'summary_capture',
+                        'capture_failure': {'type': type(exc).__name__,
+                                            **getattr(exc, 'diagnostics', {})}}
+                try:
+                    latest_body = page.locator('body').inner_text(timeout=self.navigation_timeout_ms)
+                    latest_url = page.url
+                    latest = parse_oncokb_page(latest_body, variant, latest_url)
+                    if (latest_url != current_url or latest.status != parsed.status
+                            or latest.clinical_significance != parsed.clinical_significance
+                            or latest.raw.get('biological_effect') != parsed.raw.get('biological_effect')):
+                        capture_failure = {'capture_issue': 'OncoKB result changed during capture.',
+                                           'failure_stage': 'summary_capture'}
+                    body_text, current_url = latest_body, latest_url
+                except Exception as exc:
+                    capture_failure = {'capture_issue': str(exc), 'failure_stage': 'summary_capture'}
+            else:
+                page.screenshot(path=str(screenshot_path), full_page=False)
             screenshots = [
                 {
                     "label": self._screenshot_label(database),
                     "path": str(screenshot_path),
                     "url": current_url,
                 }
-            ]
+            ] if not capture_failure else []
         if database == "OncoKB":
             evidence = parse_oncokb_page(body_text, variant, current_url)
+            if self._login_required(database, current_url):
+                evidence = DatabaseEvidence(database, 'login_required', 'OncoKB sign-in required.', url=current_url)
         else:
             evidence = parse_franklin_page(body_text, variant, current_url)
         evidence.raw.update(
             {
                 "captured_at": datetime.now(timezone.utc).isoformat(),
-                "screenshot": str(screenshot_path),
+                "screenshot": str(screenshot_path) if screenshots else '',
                 "screenshots": screenshots,
                 "visible_text_preview": body_text[:12_000],
+                **capture_failure,
             }
         )
         audit_path = screenshot_path.with_suffix(".audit.json")

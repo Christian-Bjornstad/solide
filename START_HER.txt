@@ -1,8 +1,8 @@
-Solide 0.8.7
+Solide 0.8.8
 
 1. Pakk ut hele ZIP-filen i en ny mappe.
 2. Start appen med SOLIDE_START.cmd, som tidligere.
-3. Kontroller at tittellinjen viser Solide 0.8.7.
+3. Kontroller at tittellinjen viser Solide 0.8.8.
 
 Python FELLES / Ivanti: Lim inn den kopierte kommandoen og trykk Enter.
 

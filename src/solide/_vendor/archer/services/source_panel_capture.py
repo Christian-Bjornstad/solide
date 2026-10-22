@@ -7,7 +7,8 @@ CLINVAR_PANEL_JS = '''() => {
     const title=document.querySelector('main div.functions-container');
     const summary=document.querySelector('#germline-somatic-info');
     const boxes=[title,summary].map(el=>el?.getBoundingClientRect());
-    return {ready:document.readyState==='complete' && (!document.fonts || document.fonts.status==='loaded'),
+    return {ready:document.readyState!=='loading',
+        document_state:document.readyState,font_state:document.fonts?.status,
         text:summary?.innerText||'',clip:boxes.every(b=>b?.width>0 && b?.height>0)?{
             x:Math.min(...boxes.map(b=>b.left)),y:Math.min(...boxes.map(b=>b.top)),
             width:Math.max(...boxes.map(b=>b.right))-Math.min(...boxes.map(b=>b.left)),
@@ -21,7 +22,11 @@ ONCOKB_PANEL_JS = '''() => {
     const tiles=heading?.closest('[class*="alterationTiles"]');
     const boxes=[title,tiles].map(el=>el?.getBoundingClientRect());
     const scope=tiles?.closest('.col-md-11')?.getBoundingClientRect();
-    return {ready:document.readyState==='complete' && (!document.fonts || document.fonts.status==='loaded'),
+    // A stalled tracker/image or unused font must not block a rendered result.
+    // Stable panel geometry is checked before AND after the screenshot.
+    return {ready:document.readyState!=='loading' && (tiles?.innerText||'').includes('Oncogenicity'),
+        document_state:document.readyState,font_state:document.fonts?.status,
+        text:[title,tiles].map(el=>el?.innerText||'').join(String.fromCharCode(10)),
         clip:boxes.every(b=>b?.width>0 && b?.height>0)?{
             x:Math.min(...boxes.map(b=>b.left)),y:Math.min(...boxes.map(b=>b.top)),
             width:Math.max(scope?.right||0,...boxes.map(b=>b.right))+16-Math.min(...boxes.map(b=>b.left)),
@@ -29,9 +34,19 @@ ONCOKB_PANEL_JS = '''() => {
 }'''
 
 
+class SourcePanelCaptureTimeout(TimeoutError):
+    """Retain layout/readiness diagnostics without logging full page contents."""
+
+    def __init__(self, state, required_text):
+        super().__init__('Source result panels did not reach a stable, complete layout.')
+        self.diagnostics = {'last_state': {key: state.get(key)
+            for key in ('ready', 'clip', 'document_state', 'font_state')},
+            'required_text_present': [text in state.get('text', '') for text in required_text]}
+
+
 def capture_source_panel(page,path,script,*,timeout_ms,checkpoint=lambda:None,required_text=()):
     deadline=time.monotonic()+timeout_ms/1000
-    previous=None;stable=0
+    previous=None;stable=0;state={}
     while time.monotonic()<deadline:
         checkpoint()
         state=page.evaluate(script);clip=state.get('clip')
@@ -53,4 +68,4 @@ def capture_source_panel(page,path,script,*,timeout_ms,checkpoint=lambda:None,re
         else:
             previous=None;stable=0
         page.wait_for_timeout(250)
-    raise TimeoutError('Source result panels did not reach a stable, complete layout.')
+    raise SourcePanelCaptureTimeout(state, required_text)
