@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.7 — 22 October 2026
+
+- Accept OncoKB's canonical splice/protein labels when its returned genomic
+  breadcrumb independently matches the requested GRCh37 event and gene. Keep
+  mismatching genes, alleles, assemblies and URL-only claims rejected.
+- Read ClinVar's variant-level aggregate classifications rather than the first
+  condition/submission assertion. Keep germline, somatic clinical impact and
+  oncogenicity separate in the report cell when several are available.
+- Replace vague report checks with specific Norwegian access, network, profile,
+  identity and capture messages. Retain independently verified classifications
+  when only capture failed. Document all report texts in docs/RAPPORTSVAR.md.
+- Treat COSMIC's exact-ID empty-search response as no hit instead of a rendering
+  timeout. Keep unrelated fuzzy results excluded.
+- Capture the complete OncoKB overview/effect panels and ClinVar summary after
+  fonts and layout settle; retry crops if page geometry moves during capture.
+
 ## 0.8.6 — 21 October 2026
 
 - Capture only explicitly annotated MANE Select transcript scores, together with

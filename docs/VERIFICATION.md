@@ -2,6 +2,52 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## OncoKB genomic identity and explicit report cells — 22 October 2026, v0.8.7
+
+Inspected the supplied workbook read-only: seven selected variant sheets, 42
+recorded source responses and 13 embedded images. NF1's OncoKB result had been
+discarded as a canonical-transcript mismatch. All seven Franklin searches were
+blocked by a busy dedicated Edge profile. COSMIC's TERT lookup reported an
+explicit empty search but had been classified as a rendering failure. These
+conditions previously shared the vague Kontroller resultat cell text.
+
+A live NF1 lookup reproduced the exact failure before the fix: OncoKB's rendered
+header said GRCh37, 17:g.29663493T>A, NF1 X2028_splice. Strict comparison to the
+source transcript's c.6147+2T>A rejected that canonical label despite the explicit
+returned genomic identity. The corrected parser accepts that independent proof,
+retains the source label and imports the actual Likely Oncogenic assertion.
+Wrong returned assembly, gene, position, alternate allele and URL-only claims
+remain rejected. Raw fallback results are retained for unresolved cases.
+
+Live ClinVar VCV 1299388 reproduced a separate error: the first unrestricted
+GermlineClassification/Description was Pathogenic from a condition record;
+the variant-level aggregate was Conflicting classifications of pathogenicity.
+The corrected parser returns that aggregate, Tier I - Strong somatic impact and
+Oncogenic oncogenicity as separate source assertions. Missing aggregate data
+does not promote an individual submission. Explicit legacy RCV aggregates remain
+supported. API responses and source screenshots are preserved in the audit.
+
+**178 targeted tests passed**, covering source parsing, genomic identity,
+normalization/report preservation, status text, failed captures, retry, COSMIC
+no-hits, SpliceAI and layout stability, including 23 relevant Archer-parity checks.
+The final checks include the multi-line heading-height change and HTTP access/
+rate-limit messages. The full suite was not rerun.
+
+Fresh background Edge captures and a production two-control Excel export show
+NF1's OncoKB assertion/image and all three TERT ClinVar aggregate classifications.
+Images extracted from the workbook were visually inspected; layout stability
+fixes prevent late CSS/notices from cropping out classification panels. Native
+Excel opened the report read-only without repair and confirmed both images.
+Native Excel PDFs were used only for local visual verification, including cell
+wrapping. A separate Excel process was verified before automation so existing
+user workbooks were untouched. The supplied workbook was never written to.
+
+MTBP was not queried, as requested. The busy Franklin profile on the reporting
+workstation was not forcibly closed; the report now identifies that actual
+failure. A fresh isolated OncoKB login attempt was not accepted; verification
+continued using the authenticated test profile created during the initial live
+reproduction. This does not establish successful sign-in on another workstation.
+
 ## MANE Select SpliceAI capture — 21 October 2026, v0.8.6
 
 **71 targeted tests passed** for source capture, search/retry behavior, report

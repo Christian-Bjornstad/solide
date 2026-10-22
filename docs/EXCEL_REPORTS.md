@@ -94,6 +94,32 @@ downstream queries. **Use checked name** remains available for manual review. Or
 source fields and previous results remain intact. Conflicting green normalizer
 panels cannot be embedded as accepted evidence.
 
+## OncoKB, ClinVar and report messages
+
+OncoKB's returned GRCh37 genomic breadcrumb and gene can independently confirm a
+variant even when its canonical protein/splice label differs from the imported
+transcript. The requested URL alone is insufficient. Wrong returned alleles,
+positions, genes or assemblies remain rejected. The source label is recorded
+separately; it never replaces the original imported protein or transcript.
+
+ClinVar classifications come from the VCV ClassifiedRecord/Classifications
+aggregate, not an earlier RCV/condition or individual submission. Germline,
+somatic clinical impact and oncogenicity remain separate. If multiple types are
+available, the cell lists all three with Norwegian type labels and unchanged
+source assertions. Multi-line source headings wrap to their required row height.
+
+Operational cells identify access, authentication, network, profile, layout,
+identity and capture failures. Independently verified source assertions remain
+visible with Bilde mangler when only capture fails; conflicting identities never
+inherit this exception. COSMIC's exact-ID empty search is a no-hit, while a missing
+COSMIC ID is explicitly a skipped search. The complete Norwegian message list is
+in [RAPPORTSVAR.md](RAPPORTSVAR.md).
+
+OncoKB screenshots cover the returned variant header, overview and complete
+mutation-effect tiles. ClinVar screenshots cover the variant title and the entire
+germline/somatic summary. Captures wait for fonts and stable layout, and are
+retried if geometry changes while the browser takes the image.
+
 ## SpliceAI
 
 Selected intronic candidates within ±100 bp trigger lookup, including when a

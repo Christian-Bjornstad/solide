@@ -100,6 +100,8 @@ in hidden **Kilder** and **Rådata** (right-click a tab and choose Unhide).
 App-generated workbook text is Norwegian; original classifications, database
 prose, screenshots and imported cells retain their source language.
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+[Norwegian report-cell messages](docs/RAPPORTSVAR.md) distinguish failed access,
+unconfirmed identity, missing captures and completed no-hit searches.
 
 **Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
 required. A new name is applied automatically only after an independent check

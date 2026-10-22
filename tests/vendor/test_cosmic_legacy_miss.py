@@ -43,3 +43,14 @@ def test_completed_fuzzy_results_do_not_become_exact_legacy_matches(tmp_path, te
     with pytest.raises(ProviderLookupError) as error:
         service._resolve_cosmic_mutation_page(SearchPage(text), variant)
     assert error.value.kind == kind
+
+
+@pytest.mark.parametrize('identifier,expected',[
+    ('COSM1716558',ProviderFailureKind.NOT_FOUND),('COSM17165580',ProviderFailureKind.TRANSIENT)])
+def test_explicit_empty_search_is_a_no_hit_only_for_the_requested_identifier(tmp_path,identifier,expected):
+    service=BrowserReviewService(profile_root=tmp_path,navigation_timeout_ms=500)
+    variant=VariantRecord(Path('synthetic.tsv'),1,'SOURCE','TERT','NM_198253.3:c.-124C>T',cosmic_id='COSM1716558')
+    text=f'COSMIC search results\nYour search term "{identifier}" did not return any results. More…'
+    with pytest.raises(ProviderLookupError) as error:
+        service._resolve_cosmic_mutation_page(SearchPage(text),variant)
+    assert error.value.kind==expected

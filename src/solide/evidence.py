@@ -84,7 +84,7 @@ def assess_evidence(v, evidence, session):
         issue=mtbp_legacy_matching_issue(DatabaseEvidence('MTBP',status,raw=raw))
         if issue:return EvidenceAssessment('Recheck required',issue,True)
     identity=raw.get('identity_verification',{})
-    if status=='identity_mismatch' or identity.get('accepted') is False:
+    if status=='identity_mismatch' or identity.get('accepted') is False or raw.get('failure_kind')=='identity_mismatch':
         return EvidenceAssessment('Identity mismatch','Returned identity does not match the request.',True)
     if status in FAILED:
         return EvidenceAssessment({'partial_capture':'Partial capture','login_required':'Sign-in required',
