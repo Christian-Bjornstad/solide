@@ -29,7 +29,7 @@ def test_report_filename_and_header_use_same_oslo_clock(tmp_path, monkeypatch):
     assert '_20261019_013000_' in path.name
     book = load_workbook(path)
     try:
-        assert book['Oversikt']['A4'].value == 'Opprettet (Oslo)'
+        assert book['Oversikt']['A4'].value == 'Opprettet'
         assert book['Oversikt']['C4'].value == moment.replace(tzinfo=None)
         assert book['Oversikt']['C4'].number_format == 'dd.mm.yyyy hh:mm:ss'
         assert 'Hentet (Oslo)' in [cell.value for cell in book['Kilder'][5]]

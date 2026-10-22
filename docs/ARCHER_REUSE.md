@@ -1,5 +1,12 @@
 # Archer reuse
 
+MTBP login comparison, 21 October 2026: latest main `249b823` uses the same URL
+and form controls, with a 60-second post-submission authentication budget.
+Solide v0.8.4 matches that budget and handles newly committed SSO documents
+without accepting stale pages. This is a selective login/runtime correction,
+not replacement of the vendor tree. A local real-Edge synthetic redirect/login
+comparison passed for both runtimes; real MTBP timed out for both on this PC.
+
 Latest selective port: branch `feat/workstation-improvements-2026-10-07`, commit
 `c12a1b8bb840e33a41216148bc13be1e5c69682a`, checked 15 October 2026.
 The workbook writer is unchanged since b5f50c6; v0.7.0 now follows that writer's

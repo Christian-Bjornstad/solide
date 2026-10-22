@@ -1,6 +1,326 @@
-# Verification — Solide v0.8.1
+# Verification — Solide
 
-Dates: 9–16 October 2026. Local Windows / Python 3.12.
+Local Windows / Python 3.12. Verification runs are dated below.
+
+## Expanded ClinVar source image — 22 October 2026, v0.8.9
+
+ClinVar images now include the complete germline/somatic classification summary
+and the expanded Variant Details panel. The crop retains identifiers, variation
+ID/accession, type/length, both genome locations, timeline, native HGVS table and
+the remaining detail fields. The caption is Klassifikasjon og variantdetaljer.
+Classifications still come from the same independently verified VCV aggregate;
+detail text and panel metadata are retained separately.
+
+A background production-provider run captured the requested TP53 c.749C>T
+(VCV000420136.17) and TERT c.-124C>T (VCV001299388.42). On TERT, the native
+detail panel was deliberately collapsed and successfully reopened before
+readiness/capture. The site's handlers are attached to the arrow icon itself;
+clicking its wrapping link does not expand the panel. Native section controls
+are used without changing source content. Both API assertions and genomic
+identity checks were preserved. Images extracted from the production export
+were visually checked, and an independently verified Excel process opened the
+workbook read-only with both images and no repair. Native Excel PDF previews
+were used only for local visual inspection; output remains Excel.
+
+**71 targeted tests passed:** 64 capture/source/report tests, four ClinVar
+Archer-parity checks and three opt-in managed Edge tests. Regressions cover the
+expanded crop bounds, missing/collapsed details, required detail fields, the
+native arrow event target, unchanged API classification, Norwegian caption and
+unrelated pending resources. The full suite was not rerun. Older exported
+workbooks are unchanged; rerun ClinVar to obtain the extended image.
+
+## Rendered OncoKB results and capture recovery — 22 October 2026, v0.8.8
+
+The next supplied workbook contained ten selected interpretations and 186 source
+images. Four OncoKB searches lost their source answer when native-panel capture
+timed out. The exact blocked resource/layout state was absent from those error
+records. All ten searches succeeded with complete source images in a new live
+production-provider run using the already authenticated, isolated test profile.
+The source assertions included Unknown Oncogenic Effect and Inconclusive; these
+are valid source answers, not search failures.
+
+A local managed Edge fixture reproduced an overstrict readiness dependency:
+an unrelated pending image and footer font kept the document interactive and its
+font set loading even though the source panels were visible and stable. The old
+global readiness gate could never capture them. Both OncoKB and ClinVar now pass
+this fixture while still requiring their source labels and stable bounds before
+and after screenshot capture. This reproduces the failure mechanism, not the
+unrecorded network conditions on the reporting workstation.
+
+Capture-only failures preserve the parsed source answer, omit image references,
+retain layout diagnostics and remain retryable. Regressions cover source/variant
+changes, login expiry during capture, classification retention in Kilder, and
+independently confirmed classifications with Bilde mangler in the overview.
+The missing COSMIC-ID text is shortened in both provider responses and Excel.
+
+**194 targeted tests passed:** 169 source/report/workflow tests, 23 relevant
+Archer-parity checks and two opt-in background managed Edge tests. The full suite
+was not rerun. Source compilation and diff checks passed.
+
+The report audit also checked ten Mutalyzer results, ten Franklin results, eight
+ClinVar matches, three COSMIC matches, two BRCA Exchange matches and the single
+applicable MANE Select SpliceAI/Pangolin/consequence image. The two ClinVar no-hits
+were checked against the six returned VCV records: other alternate alleles or
+overlapping indels must not be imported as the requested substitution. No
+identity checks were weakened to convert these no-hits into matches.
+
+A production Excel test export combined the ten fresh OncoKB results with the
+other source evidence embedded in the supplied report. It contained 190 source
+images and explicit result cells. A separately verified Excel instance opened
+it read-only without repair; the source images and native overview PDF were
+visually inspected. The original workbook SHA256 was unchanged. No existing
+Excel window, user browser profile or MTBP service was operated. Other database
+results in this export were reviewed and preserved, not represented as new live
+searches. Fresh OncoKB sign-in on another workstation remains unverified.
+
+## OncoKB genomic identity and explicit report cells — 22 October 2026, v0.8.7
+
+Inspected the supplied workbook read-only: seven selected variant sheets, 42
+recorded source responses and 13 embedded images. NF1's OncoKB result had been
+discarded as a canonical-transcript mismatch. All seven Franklin searches were
+blocked by a busy dedicated Edge profile. COSMIC's TERT lookup reported an
+explicit empty search but had been classified as a rendering failure. These
+conditions previously shared the vague Kontroller resultat cell text.
+
+A live NF1 lookup reproduced the exact failure before the fix: OncoKB's rendered
+header said GRCh37, 17:g.29663493T>A, NF1 X2028_splice. Strict comparison to the
+source transcript's c.6147+2T>A rejected that canonical label despite the explicit
+returned genomic identity. The corrected parser accepts that independent proof,
+retains the source label and imports the actual Likely Oncogenic assertion.
+Wrong returned assembly, gene, position, alternate allele and URL-only claims
+remain rejected. Raw fallback results are retained for unresolved cases.
+
+Live ClinVar VCV 1299388 reproduced a separate error: the first unrestricted
+GermlineClassification/Description was Pathogenic from a condition record;
+the variant-level aggregate was Conflicting classifications of pathogenicity.
+The corrected parser returns that aggregate, Tier I - Strong somatic impact and
+Oncogenic oncogenicity as separate source assertions. Missing aggregate data
+does not promote an individual submission. Explicit legacy RCV aggregates remain
+supported. API responses and source screenshots are preserved in the audit.
+
+**178 targeted tests passed**, covering source parsing, genomic identity,
+normalization/report preservation, status text, failed captures, retry, COSMIC
+no-hits, SpliceAI and layout stability, including 23 relevant Archer-parity checks.
+The final checks include the multi-line heading-height change and HTTP access/
+rate-limit messages. The full suite was not rerun.
+
+Fresh background Edge captures and a production two-control Excel export show
+NF1's OncoKB assertion/image and all three TERT ClinVar aggregate classifications.
+Images extracted from the workbook were visually inspected; layout stability
+fixes prevent late CSS/notices from cropping out classification panels. Native
+Excel opened the report read-only without repair and confirmed both images.
+Native Excel PDFs were used only for local visual verification, including cell
+wrapping. A separate Excel process was verified before automation so existing
+user workbooks were untouched. The supplied workbook was never written to.
+
+MTBP was not queried, as requested. The busy Franklin profile on the reporting
+workstation was not forcibly closed; the report now identifies that actual
+failure. A fresh isolated OncoKB login attempt was not accepted; verification
+continued using the authenticated test profile created during the initial live
+reproduction. This does not establish successful sign-in on another workstation.
+
+## MANE Select SpliceAI capture — 21 October 2026, v0.8.6
+
+**71 targeted tests passed** for source capture, search/retry behavior, report
+source order, SpliceAI visibility and clean Excel export. Regressions reject
+wrong allele/assembly/settings, altered MANE annotations, non-finite Pangolin
+scores, extra/missing transcript rows, missing panels, prediction errors and
+canonical fallback. Multiple MANE transcripts remain visible. Earlier captures
+without Pangolin/consequences enter Retry failed without losing API evidence.
+The full suite was not rerun, following the user's earlier instruction.
+
+A live managed Edge run used the public NF1 example NM_001042492.3:c.6147+2T>A
+(hg19 chr17:29663493 T>A) from the supplied reference image. The full six-row
+SpliceAI API response matched the page before filtering. The resulting native
+image contains exactly four SpliceAI and two Pangolin score rows for MANE Select
+ENST00000358273.9_12, followed by its SAI-10k-calc consequence. Other transcripts
+and unrelated predictor sections are excluded. Existing masked/500 bp/REF-ALT
+settings remain unchanged; predictions are not edited to match a reference image.
+
+The production Excel export has two embedded images: the verified query/settings
+and the combined three-section panel. The image extracted from the workbook was
+visually inspected, including the last consequence row. Native Microsoft Excel
+opened the report read-only without repair and confirmed both images; its file
+hash was unchanged. Tests used isolated background Edge profiles and Qt offscreen.
+MTBP was not queried during this change because the user reported it unavailable.
+
+## Visible database selection and Excel label — 21 October 2026, v0.8.5
+
+**34 targeted tests passed** for database selection, report language/local time,
+the everyday workflow, analysis isolation, SpliceAI visibility and readability.
+The source controls are permanently visible and can select/clear all databases.
+Worker-boundary checks confirm that normal and rerun-all searches receive only
+the checked databases; empty selection launches no worker.
+
+Offscreen Qt screenshots were inspected at 1440×940 and 1050×700. All eight
+checkboxes retain their full geometry; the compact-window page scrolls instead
+of overlapping controls. A fresh production Excel export contains Opprettet
+in A4 and the unchanged local-time date value/format in C4.
+
+## Archer login comparison — 21 October 2026, v0.8.4
+
+Compared the latest Archer Prosess main (249b823) with Solide. Both use the same
+MTBP analysis URL and Keycloak username/password/submit controls. Archer allows
+60 seconds after credential submission; Solide now uses at least that budget
+while retaining cancellable waits and positive authentication checks.
+
+A reproduced Solide-only navigation defect required the initial loader ID even
+after a new SSO document had committed. Navigation now remembers the previous
+document and accepts a new document in the requested main frame. The old page,
+another/missing frame and Chromium error documents remain rejected.
+
+**60 targeted tests passed** for CDP navigation, MTBP login, cancellation and Qt
+worker cleanup/retry. The full suite was not rerun, as requested. A real managed
+Edge comparison passed for both applications against a local synthetic login
+fixture: immediate JavaScript redirect, a delayed navigation acknowledgement,
+visible login form, synthetic credential submission and arrival at the analysis
+input. No real credentials were used in that fixture.
+
+The latest Archer login code was also run against real MTBP in a separate
+background profile on this PC. It returned the same ERR_CONNECTION_TIMED_OUT
+as Solide. The user clarified that Archer had worked on a different PC. These
+are different environments; positive live MTBP login on this PC is still
+unconfirmed. No network/proxy settings or existing browser profiles were changed.
+
+## MTBP login navigation — 21 October 2026, v0.8.3
+
+The reported failure was reproduced with the unmodified application against
+the real MTBP site: Page.navigate timed out after exactly 15 seconds, before
+credentials could be entered. A separate Edge navigation with a 45-second
+budget ended with net::ERR_CONNECTION_TIMED_OUT. Independent curl access to
+the same HTTPS endpoint also timed out; the system DNS and a separate public
+resolver returned the same address. These checks establish a connection failure
+from this PC, not a bad password or proof of a worldwide MTBP outage.
+
+The login now uses the configured 45-second navigation/authentication budget,
+waits for the actual visible Keycloak form or positively authenticated MTBP
+input, and inspects a usable redirected document after navigation timeout.
+Only HTTPS on the exact MTBP origin is accepted for this recovery. One retry
+is limited to opening the login page; credential submissions are not replayed.
+The dedicated browser profile is always released and readiness waits can be
+cancelled.
+
+The production live login rerun returned an unconfirmed Norwegian connection
+message after two unsuccessful navigations, retaining ERR_CONNECTION_TIMED_OUT.
+No credentials were submitted or marked verified. Actual positive MTBP login
+could not be confirmed while the endpoint remained unreachable from this PC.
+
+**956 tests passed**, including thirteen provider regressions for slow
+navigation, delayed forms, timed-out but usable pages, transient recovery,
+unreachable service, rejected origins, cancellation and slow authentication.
+A real Qt LoginWorker test verifies failure cleanup and a subsequent successful
+retry against controlled browser responses. Inverting the trusted-origin guard
+was detected by the new tests, and source bytes were restored afterwards.
+
+## Workstation API recovery — 20 October 2026, v0.8.2
+
+**898 tests passed** in 69.43 seconds. Source compilation and diff checks passed.
+
+### Actual-input rerun — 20 October 2026
+
+- **942 tests passed** in 70.36 seconds after the additional provider and
+  genomic-only input fixes. Source compilation and diff checks passed.
+- The full production GUI workflow also completed on the supplied 20-row HRR
+  input with 20 selected interpretations and 146 source jobs. All 20 Mutalyzer
+  identities were verified. Franklin returned 20 verified matches, OncoKB 20
+  source results, ClinVar 16 matches/four explicit no-hits, SpliceAI one verified
+  intronic result, and BRCA Exchange four verified matches/one no-hit. Sources
+  without applicable input were not queried. Excel opened normally with 20 raw
+  rows, 20 selected findings and 394 embedded images. The overlapping unselected
+  interpretation was not added to findings or the submitted MTBP group.
+- A two-variant KIT OPA run exposed a genomic-only complex variant that was
+  unnecessarily blocked after successful normalization. It now adopts only the
+  independently checked genomic name, retaining original cells and without
+  inferring a transcript or protein. Live MTBP rerun matched both distinct KIT
+  rows and exported normally. Its More popup reports VCF alleles with a padding
+  base; the shared event normalizer now compares complete, explicitly GRCh37
+  DNA events. Wrong assembly, coordinate, REF/ALT or protein remains rejected.
+  A genomic-only query cannot fall back to an unidentified gene-only row.
+- A fresh full Mutalyzer/MTBP rerun of the 20 selected HRR variants then matched
+  **20/20 MTBP rows**, including PTEN c.254-1G>A, which the old cDNA-only reader
+  missed. Its Excel export completed without errors with 20 selected findings,
+  20 original raw rows and 22 images. Only the test-created portal report was
+  removed after capture; all source-file hashes remained unchanged.
+- The HRR COSMIC identifier COSM937333 returned zero Legacy Mutations and 15
+  unrelated fuzzy results on the fully loaded website. A fresh live rerun now
+  records no exact legacy match instead of a transient rendering failure;
+  unrelated records are not used. Other exact COSMIC lookups still succeed.
+- Native Excel additionally opened the full HRR report and both KIT reports
+  without repair (394, 41 and four images). Franklin's expanded Clinical evidence
+  image was read back from an exported workbook and visually checked.
+- An isolated inversion of the new genomic-event comparison was detected by
+  its regression tests; the source was restored byte-for-byte afterwards.
+- **914 tests passed** in 72.82 seconds after the actual-input regressions below.
+- Imported fourteen supplied TSVs (the twelve archived exports plus the two
+  original local inputs): 86 original source rows and 81 selected sequence
+  interpretations. All original hashes were preserved. Technical test sample
+  bindings were used; original patient identifiers were not sent to providers.
+- Live Mutalyzer checks initially exposed six unnecessarily blocked cases:
+  ATRX, three ATM variants, a TERT promoter variant and KRAS. RefSeq/assembly
+  sequence differences elsewhere now require independent normalization of the
+  filtered mapping in the exact genomic transcript context, followed by the
+  existing source-event comparison. Missing context, changed gene/version,
+  different events and malformed responses still fail closed.
+- Promoter EOUTOFBOUNDARY responses can now be checked against explicit GRCh37
+  source alleles using the exact genomic transcript. The original transcript
+  rejection remains retained; no coordinate is inferred from a gene name.
+- Rechecking all six yielded **81 confirmed identities: 71 unchanged and ten
+  normalized**. All fourteen reports opened normally in native Microsoft Excel
+  without repair, retaining the 86 original rows and 81 selected findings.
+- A real single-variant OPA input completed the production Qt import, selection,
+  search and export workers with live ClinVar, Franklin, COSMIC, OncoKB and MTBP
+  results and 25 embedded images. It completed again with Python API access
+  deliberately failing through a proxy, using managed Edge recovery.
+- Additional live forced-proxy checks returned the expected BRCA Exchange
+  record and six SpliceAI transcript score rows. BRCA Exchange now shares the
+  restricted public-API transport; authenticated providers remain browser based.
+- Live validation uses separate browser profiles and refuses to delete any
+  pre-existing MTBP reports. Only reports created by the validation run are
+  removed after local capture. User applications and normal profiles are kept.
+
+The supplied activity logs showed immediate Mutalyzer/SpliceAI failures while
+browser-based ClinVar and Franklin searches completed. The logs did not retain
+the underlying API exception, so they cannot establish the exact workstation
+network cause. The export error came from one unresolved selected annotation;
+that same annotation correctly prevented submission of an incomplete MTBP batch.
+
+- Public API transport now tries managed Edge after a Python connection/TLS
+  failure, proxy HTTP 403/407 response, or HTML access page. One isolated
+  temporary browser session is reused within the worker and closed afterwards.
+  Destination allowlists, HTTPS, response status, exact request identity and
+  all existing genomic-event validation remain enforced. No credentials,
+  patient IDs, filenames or raw source rows are passed to the transport.
+- If NCBI is unreachable, exact transcript identity can be checked against
+  Mutalyzer's RefSeq model, including organism, accession/version, unique gene
+  and CDS/protein hierarchy. A substantive NCBI reference conflict does not
+  trigger this fallback. NM and NR cases, malformed/conflicting references,
+  cooldown, reuse and cleanup have regression coverage.
+- Live testing forced Python TLS failure for every API read and separately
+  blocked NCBI. The two KIT examples and NF1 example normalized to the expected
+  delins/dup names and predicted proteins. Reordered KLLN/PTEN candidates
+  resolved to PTEN c.19G>A, then four selected findings exported successfully.
+  Native Microsoft Excel opened the report normally without repair and retained
+  all four original source rows, including the old KIT spelling.
+- Live checks also resolved the supplied H3-3A/H3P6, TET2/TET2-AS1 and reordered
+  CSDE1/NRAS examples. NRAS resolved to NM_002524.5:c.34G>T / p.(Gly12Cys).
+- A deliberately wrong PTEN reference base returned HTTP 422 through Edge and
+  stayed a sequence conflict. The intronic PTEN c.254-1G>A example was verified
+  in its explicit GRCh37 context; SpliceAI returned six transcript score rows
+  for chr10-89692769-G-A.
+- MTBP query generation retained normalized HGVS and its allele-equivalent
+  genomic fallback for all four selected examples. A regression test recovers
+  the entire selected batch after a temporary annotation outage. No authenticated
+  MTBP submission was performed in this verification run.
+- The synthetic stress run passed 51 checks with 1,500 random GUI actions and
+  a 5,000-row input. Original fixture hashes were unchanged. A mutation of the
+  fallback organism guard was detected by its regression test.
+
+Workstation-specific proxy/Edge access and authenticated MTBP submission still
+need verification on the affected work PC. Export continues to reject unresolved
+selected identities; it now identifies the transcript/source row and explains
+retrying or explicitly deselecting the row, without silently omitting findings.
+All supplied logs, workbook notes and generated verification artifacts stay
+local and Git-ignored.
 
 ## Windows install/start launchers — 16 October 2026
 

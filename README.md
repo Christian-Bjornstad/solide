@@ -100,6 +100,8 @@ in hidden **Kilder** and **Rådata** (right-click a tab and choose Unhide).
 App-generated workbook text is Norwegian; original classifications, database
 prose, screenshots and imported cells retain their source language.
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+[Norwegian report-cell messages](docs/RAPPORTSVAR.md) distinguish failed access,
+unconfirmed identity, missing captures and completed no-hit searches.
 
 **Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
 required. A new name is applied automatically only after an independent check
@@ -116,9 +118,11 @@ SpliceAI runs automatically for selected intronic candidates within ±100 bp.
 The search page shows the candidate count. Excel says **Ikke kjørt** when a
 selected variant is outside that rule.
 Its prediction window is ±500 bp with masked scores on hg19; this window differs
-from the rule selecting candidates. The app captures the actual query/settings
-and all basic transcript scores. A failed screenshot retains the API result and
-appears as **Missing capture**, available through **Retry failed**.
+from the rule selecting candidates. The app captures the actual query/settings,
+then MANE Select SpliceAI scores, Pangolin scores and Predicted Splicing
+Consequences together. The full API transcript data is retained. A failed or
+incomplete screenshot retains the API result and appears as **Missing capture**,
+available through **Retry failed**, including older SpliceAI-only captures.
 
 Source data, app assessments, reviewed HGVS and search history live only in the current session.
 Assessment is performed in the app. Excel is a versioned snapshot; edits to an

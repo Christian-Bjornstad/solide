@@ -36,6 +36,24 @@ def test_confirmed_normalized_name_is_used_without_changing_imported_data():
     assert not apply_confirmed_normalization(v,data)
 
 
+def test_unchanged_verified_name_finishes_without_an_unneeded_screenshot(monkeypatch,tmp_path):
+    import solide.evidence as module
+    from unittest.mock import Mock
+    v=variant();v.coding='c.2235_2249del';v.kind='INDEL'
+    data=checked_result();data['original']='NM_005228.5:c.2235_2249del'
+    data['normalization']['input_description']=data['original']
+    data['nomenclature_assessment']['status']='Unchanged'
+    session=Session(variants=[v]);capture=Mock()
+    monkeypatch.setattr(module,'normalize_variant',lambda row:data)
+    monkeypatch.setattr(module,'capture_mutalyzer',capture)
+    module.run_queue(session,['Mutalyzer'],tmp_path,module.QueueControl(),lambda *args:None,lambda text:None)
+    evidence=v.evidence['Mutalyzer']
+    assert evidence['status']=='verified'
+    assert module.assess_evidence(v,evidence,session).label=='Verified match'
+    assert not module.build_search_plan(session,['Mutalyzer'])
+    capture.assert_not_called()
+
+
 @pytest.mark.parametrize('change', ['conflict','unconfirmed','missing_event','wrong_allele',
     'old_input','unlisted_name','ambiguous_gene','ambiguous_transcript','unchanged',
     'malformed_check','wrong_reference','unconfirmed_transcript'])

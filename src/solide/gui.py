@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLa
     QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
     QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
+from . import __version__
 from .analyses import add_analysis,ensure_analyses,analysis_scoped_session,rename_analysis_sample
 from .annotations import source_row_groups,annotation_resolution_current
 from .import_dialog import SampleImportDialog,OumLineEdit
@@ -77,8 +78,10 @@ QHeaderView::section { background: #EDF2E9; padding: 10px; border: 0; border-bot
 QGroupBox { background: white; border: 1px solid #DEE5DA; border-radius: 10px; margin-top: 12px; padding: 20px; }
 QGroupBox::title { subcontrol-origin: margin; left: 18px; padding: 0 6px; font-weight: 600; }
 QGroupBox#settingsCard { margin-top: 0; padding: 12px; }
+QGroupBox#databaseChoices { margin-top: 8px; padding: 6px; }
 QScrollArea { border: 0; background: transparent; }
 QWidget#settingsContent { background: #F5F7F4; }
+QWidget#searchContent { background: #F5F7F4; }
 QScrollBar:vertical { background: #F5F7F4; width: 12px; margin: 0; border: 0; }
 QScrollBar::handle:vertical { background: #CBD5C5; border: 3px solid #F5F7F4; border-radius: 6px; min-height: 36px; }
 QScrollBar::handle:vertical:hover { background: #9BAE92; }
@@ -190,7 +193,7 @@ class MainWindow(QMainWindow):
         self.config_path=Path.home()/'.solide'/'ui_config.json'
         self.config=read_ui_settings(self.config_path)
         self.login_verified=set();self.close_after_login=False
-        self.setWindowTitle('Solide | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
+        self.setWindowTitle(f'Solide {__version__} | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
         self.setMinimumSize(1050,700);self.setPalette(light_palette());self.setStyleSheet(STYLE)
         central=QWidget();self.setCentralWidget(central)
         horizontal=QHBoxLayout(central);horizontal.setContentsMargins(0,0,0,0);horizontal.setSpacing(0)
@@ -243,7 +246,7 @@ class MainWindow(QMainWindow):
         self.nav.currentRowChanged.connect(self.navigate);self.nav.setCurrentRow(0)
         self.apply_appearance()
         self.refresh()
-        self.record_activity('Application started')
+        self.record_activity(f'Application started · Solide {__version__}')
 
     def consolidate_workspace(self):
         original=[self.pages.widget(i) for i in range(self.pages.count())]
@@ -259,7 +262,7 @@ class MainWindow(QMainWindow):
         self.workspace_view.currentIndexChanged.connect(self.workspace_pages.setCurrentIndex)
         self.empty_state=QWidget();layout.addWidget(self.empty_state,1)
         layout.addWidget(self.workspace_pages,1);self.pages.addWidget(original[0]);self.pages.addWidget(workspace)
-        searches=original[3];search_layout=searches.layout()
+        searches=original[3];searches.setObjectName('searchContent');search_layout=searches.layout()
         export_row=QHBoxLayout();export_row.addWidget(self.report_btn);export_row.addWidget(self.include_evidence)
         export_row.addStretch();self.exports_toggle=self.button('Exported files',lambda:None)
         self.exports_toggle.setCheckable(True);export_row.addWidget(self.exports_toggle)
@@ -269,7 +272,12 @@ class MainWindow(QMainWindow):
         self.report_log.hide();self.exports_toggle.toggled.connect(self.report_log.setVisible)
         self.report_analysis_label.setParent(searches);self.report_analysis_label.hide()
         original[4].deleteLater()
-        self.pages.addWidget(searches);self.pages.addWidget(original[5])
+        search_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.search_scroll=QScrollArea();self.search_scroll.setWidgetResizable(True)
+        self.search_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.search_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.search_scroll.setWidget(searches)
+        self.pages.addWidget(self.search_scroll);self.pages.addWidget(original[5])
         # Import history is recorded in the common log; retain the widget for the
         # existing import summary handler, without another navigation destination.
         self.import_log.hide()
@@ -445,19 +453,11 @@ class MainWindow(QMainWindow):
         self.selection_summary=QLabel();self.selection_summary.hide()
 
     def build_evidence(self):
-        layout=self.page()
-        options_row=QHBoxLayout();self.sources_toggle=self.button('Sources / tissue…',lambda:None)
-        self.sources_toggle.setCheckable(True);options_row.addWidget(self.sources_toggle)
-        self.sources_summary=QLabel();self.sources_summary.setWordWrap(True);options_row.addWidget(self.sources_summary,1)
-        layout.addLayout(options_row)
-        self.source_options=QWidget();options=QVBoxLayout(self.source_options);options.setContentsMargins(0,0,0,0)
-        self.source_options.hide();self.sources_toggle.toggled.connect(self.source_options.setVisible)
-        layout.addWidget(self.source_options);top=QHBoxLayout()
-        self.tissue_patient=QComboBox();self.tissue_patient.currentTextChanged.connect(self.show_tissue)
-        self.tissue=QComboBox();self.tissue.setEditable(True);self.tissue.addItems(['Other','Lung','Breast','Colorectal'])
-        self.tissue_patient.hide()
-        top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
-        top.addWidget(self.button('Save tissue',self.save_tissue));options.addLayout(top)
+        layout=self.page();layout.setSpacing(8)
+        self.source_options=QGroupBox('Databaser');options=QVBoxLayout(self.source_options)
+        self.source_options.setObjectName('databaseChoices')
+        options.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.addWidget(self.source_options)
         self.source_checks={};sources=QGridLayout()
         for index,source in enumerate(SOURCES):
             check=QCheckBox(source);check.setChecked(source in self.config.get('sources',['ClinVar','MTBP','Franklin','Mutalyzer','SpliceAI']))
@@ -465,9 +465,21 @@ class MainWindow(QMainWindow):
             if source=='BRCA Exchange':check.setToolTip('Runs only for BRCA1 and BRCA2. Exact hg19 alleles or versioned HGVS are checked.')
             sources.addWidget(check,index//4,index%4);self.source_checks[source]=check
         options.addLayout(sources)
+        choices=QHBoxLayout()
+        self.select_all_sources_btn=self.button('Velg alle',lambda:self.select_sources(True))
+        self.clear_sources_btn=self.button('Fjern alle',lambda:self.select_sources(False))
+        choices.addWidget(self.select_all_sources_btn);choices.addWidget(self.clear_sources_btn)
+        self.sources_summary=QLabel();self.sources_summary.setWordWrap(True);choices.addWidget(self.sources_summary,1)
+        options.addLayout(choices)
+        top=QHBoxLayout()
+        self.tissue_patient=QComboBox();self.tissue_patient.currentTextChanged.connect(self.show_tissue)
+        self.tissue=QComboBox();self.tissue.setEditable(True);self.tissue.addItems(['Other','Lung','Breast','Colorectal'])
+        self.tissue_patient.hide()
+        top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
+        top.addWidget(self.button('Save tissue',self.save_tissue));options.addLayout(top)
         self.tissue.currentTextChanged.connect(self.update_sources_summary)
         row=QHBoxLayout();self.run_btn=self.button('Run searches',self.start_queue,True);row.addWidget(self.run_btn)
-        self.run_btn.setText('Search databases')
+        self.run_btn.setText('Søk i valgte databaser')
         self.run_btn.setToolTip('Run new, incomplete or outdated searches. Completed matches and no-match results are preserved.')
         self.pause_btn=self.button('Pause',self.pause_queue);self.pause_btn.setEnabled(False);row.addWidget(self.pause_btn)
         self.stop_btn=self.button('Stop',self.stop_queue);self.stop_btn.setEnabled(False);row.addWidget(self.stop_btn)
@@ -492,6 +504,10 @@ class MainWindow(QMainWindow):
         self.evidence_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.evidence_table.doubleClicked.connect(lambda index:self.inspect_evidence());layout.addWidget(self.evidence_table,2)
         for check in self.source_checks.values():check.toggled.connect(self.refresh_evidence);check.toggled.connect(self.update_sources_summary)
+
+    def select_sources(self,checked):
+        if self.active:return
+        for check in self.source_checks.values():check.setChecked(checked)
 
     def update_sources_summary(self,*args):
         selected=[source for source,check in self.source_checks.items() if check.isChecked()]
@@ -824,7 +840,9 @@ class MainWindow(QMainWindow):
             self.normalization_status.setText('Outdated — rerun Mutalyzer for the current identity.');return
         assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
         applied=evidence.get('raw',{}).get('nomenclature_application',{}).get('applied') is True
+        unchanged=assessment.get('status')=='Unchanged' and assessment.get('identity_confirmed') is True
         self.normalization_status.setText('Normalisert · brukes i søk og rapport' if applied else
+            'Navnet er kontrollert · uendret' if unchanged else
             assessment.get('status','Review required')+' · '+assessment.get('reason',evidence.get('summary','')))
         if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict':return
         candidates=assessment.get('candidates',[])
@@ -1079,7 +1097,7 @@ class MainWindow(QMainWindow):
             self.banner.setText('Ingen varianter valgt. Kryss av i Valgt-kolonnen.');return
         sources=sorted({source for id,source in chosen}) if mode=='chosen' else [s for s,c in self.source_checks.items() if c.isChecked()]
         if not sources:
-            self.banner.setText('Velg minst én kilde.');return
+            self.banner.setText('Velg minst én database.');return
         plan=build_search_plan(scope,sources,mode,chosen)
         if not plan:self.banner.setText('No searches to run');self.record_activity(f'{mode}: no searches to run');return
         root=self.work_root()
@@ -1195,7 +1213,12 @@ class MainWindow(QMainWindow):
         if 'provisional_status' not in e.get('raw',{}):
             self.run_done.add(key);self.progress.setValue(len(self.run_done))
             assessment=assess_evidence(v,e,self.session)
-            self.record_activity(f'{source} · {v.gene}: {assessment.label}')
+            detail=''
+            if assessment.retryable or e.get('status') in {'needs_review','error','network_error'}:
+                detail=' | '+str(e.get('summary') or assessment.reason).replace('\n',' ')[:800]
+                failure=e.get('raw',{}).get('failure') or v.raw.get('_annotation_resolution',{}).get('failure')
+                if failure:detail+=' | '+str(failure.get('type',''))
+            self.record_activity(f'{source} · {v.gene}: {assessment.label}'+detail)
         if source=='Mutalyzer' and self.current_variant is v:
             row=next((i for i,item in enumerate(self.variant_model.variants) if item is v),None)
             if row is not None:self.show_variant(self.proxy.mapFromSource(self.variant_model.index(row,0)))

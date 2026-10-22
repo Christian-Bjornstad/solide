@@ -510,6 +510,12 @@ class EdgeCdpPage:
         wait_until: str = "domcontentloaded",
         timeout: int = 30_000,
     ) -> None:
+        previous_loader = None
+        try:
+            previous_tree = self._connection.call("Page.getFrameTree", timeout_ms=min(2_000, timeout))
+            previous_loader = previous_tree.get("frameTree", {}).get("frame", {}).get("loaderId")
+        except (EdgeCdpError, EdgeCdpTimeout):
+            pass
         response = self._connection.call(
             "Page.navigate", {"url": url}, timeout_ms=timeout
         )
@@ -524,13 +530,23 @@ class EdgeCdpPage:
             try:
                 # Page.navigate can acknowledge before the new document commits.
                 # The previous document may still report "complete" at that point.
-                # Compare the loader so a fast readiness check cannot return the
-                # old form, reports list or authentication page.
+                # SSO may commit another document before we observe the first
+                # loader. Accept that new main document, never the old page.
                 loader_id = response.get("loaderId")
                 if loader_id:
                     tree = self._connection.call("Page.getFrameTree", timeout_ms=min(2_000, timeout))
                     frame = tree.get("frameTree", {}).get("frame", {})
-                    if frame.get("loaderId") != loader_id:
+                    current_loader = frame.get("loaderId")
+                    redirected = bool(previous_loader and current_loader
+                                      and current_loader != previous_loader
+                                      and response.get("frameId")
+                                      and frame.get("id") == response["frameId"])
+                    wrong_frame = (frame.get("id") and response.get("frameId")
+                                   and frame["id"] != response["frameId"])
+                    error_page = (str(frame.get("url", "")).startswith(("chrome-error:", "edge-error:"))
+                                  or bool(frame.get("unreachableUrl")))
+                    if (wrong_frame or error_page
+                            or (current_loader != loader_id and not redirected)):
                         time.sleep(0.05)
                         continue
                 state = self._evaluate_value(

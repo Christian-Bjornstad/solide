@@ -94,6 +94,36 @@ downstream queries. **Use checked name** remains available for manual review. Or
 source fields and previous results remain intact. Conflicting green normalizer
 panels cannot be embedded as accepted evidence.
 
+## OncoKB, ClinVar and report messages
+
+OncoKB's returned GRCh37 genomic breadcrumb and gene can independently confirm a
+variant even when its canonical protein/splice label differs from the imported
+transcript. The requested URL alone is insufficient. Wrong returned alleles,
+positions, genes or assemblies remain rejected. The source label is recorded
+separately; it never replaces the original imported protein or transcript.
+
+ClinVar classifications come from the VCV ClassifiedRecord/Classifications
+aggregate, not an earlier RCV/condition or individual submission. Germline,
+somatic clinical impact and oncogenicity remain separate. If multiple types are
+available, the cell lists all three with Norwegian type labels and unchanged
+source assertions. Multi-line source headings wrap to their required row height.
+
+Operational cells identify access, authentication, network, profile, layout,
+identity and capture failures. Independently verified source assertions remain
+visible with Bilde mangler when only capture fails; conflicting identities never
+inherit this exception. COSMIC's exact-ID empty search is a no-hit, while a missing
+COSMIC ID is explicitly a skipped search. The complete Norwegian message list is
+in [RAPPORTSVAR.md](RAPPORTSVAR.md).
+
+OncoKB screenshots cover the returned variant header, overview and complete
+mutation-effect tiles. ClinVar screenshots cover the variant title and the entire
+germline/somatic summary together with the expanded Variant Details panel:
+identifiers, type/length, GRCh37/GRCh38 location, timeline, HGVS table and the
+remaining native detail fields. Collapsed details are opened through ClinVar's
+own control. The report caption is Klassifikasjon og variantdetaljer. Required
+panels must be visible and their geometry stable before and after capture;
+unrelated unfinished document resources do not block a rendered result.
+
 ## SpliceAI
 
 Selected intronic candidates within ±100 bp trigger lookup, including when a
@@ -102,11 +132,21 @@ uses hg19, basic annotations, distance 500 and masked scores. The 500 bp predict
 window is distinct from the candidate-selection rule. Exonic variants are not
 implicitly assigned an intronic consequence by a different transcript.
 
-Capture the actual website query/settings and every basic transcript's score rows,
-including REF/ALT columns. The page's returned allele, genome, mask, distance,
-transcripts and DS/DP scores must agree with the API response before capture.
-Missing or incompatible images retain the API prediction and expose Missing
-capture for retry. A verified identity is not a clinical splicing classification.
+Capture the actual website query/settings, then one combined native image with
+MANE Select SpliceAI scores, Pangolin scores and Predicted Splicing Consequences
+(SAI-10k-calc). Preserve REF/ALT columns and all returned transcripts in the raw
+API evidence. The screenshot filters only explicit MANE Select annotations, with
+no canonical or MANE Plus Clinical fallback. If several genes have MANE Select
+transcripts, retain each tool's complete MANE set rather than picking the first.
+
+The page's returned allele, genome, mask, distance, complete transcript set and
+DS/DP scores must agree with the SpliceAI API response before filtering. Pangolin
+must separately confirm the same allele/settings and finite scores. Every MANE
+score row and the SAI-10k-calc transcript/output must be visible; an explicit
+source No prediction is valid, while an unavailable predictor is not.
+Missing or incompatible sections retain the API result and expose Missing capture
+for retry. Earlier all-transcript/SpliceAI-only captures are also retriable.
+A verified identity is not a clinical splicing classification.
 
 When SpliceAI is not indicated, Oversikt states **Ikke kjørt**. The ±100 bp
 intronic selection rule is unchanged. The app shows the number of

@@ -47,6 +47,50 @@ def test_navigation_does_not_accept_previous_complete_document(monkeypatch):
     assert state['reads']==2 and page._last_url=='https://example.org/redirected'
 
 
+def test_navigation_accepts_new_main_document_after_sso_redirect(monkeypatch):
+    from types import SimpleNamespace
+    started = [False]
+    def command(method, params=None, **kwargs):
+        if method == 'Page.navigate':
+            started[0] = True
+            return {'loaderId': 'initial-request', 'frameId': 'main'}
+        assert method == 'Page.getFrameTree'
+        return {'frameTree': {'frame': {
+            'id': 'main', 'loaderId': 'sso-document' if started[0] else 'previous',
+            'url': 'https://mtbp.org/keycloak/auth' if started[0] else 'about:blank',
+        }}}
+    page = EdgeCdpPage.__new__(EdgeCdpPage)
+    page._connection = SimpleNamespace(call=command)
+    page._last_url = 'about:blank'
+    monkeypatch.setattr(page, '_evaluate_value', lambda expression, **kwargs:
+        'complete' if expression == 'document.readyState' else 'https://mtbp.org/keycloak/auth')
+    page.goto('https://mtbp.org/analyse/', timeout=100)
+    assert page._last_url == 'https://mtbp.org/keycloak/auth'
+
+
+@pytest.mark.parametrize('after', [
+    {'id': 'main', 'loaderId': 'previous', 'url': 'https://mtbp.org/keycloak/auth'},
+    {'id': 'another-frame', 'loaderId': 'redirect', 'url': 'https://mtbp.org/keycloak/auth'},
+    {'loaderId': 'redirect', 'url': 'https://mtbp.org/keycloak/auth'},
+    {'id': 'main', 'loaderId': 'redirect', 'url': 'chrome-error://chromewebdata/'},
+])
+def test_navigation_rejects_old_foreign_frame_or_browser_error_document(monkeypatch, after):
+    from types import SimpleNamespace
+    started = [False]
+    def command(method, params=None, **kwargs):
+        if method == 'Page.navigate':
+            started[0] = True
+            return {'loaderId': 'initial-request', 'frameId': 'main'}
+        return {'frameTree': {'frame': after if started[0] else
+            {'id': 'main', 'loaderId': 'previous', 'url': 'about:blank'}}}
+    page = EdgeCdpPage.__new__(EdgeCdpPage)
+    page._connection = SimpleNamespace(call=command)
+    page._last_url = 'about:blank'
+    monkeypatch.setattr(page, '_evaluate_value', lambda *args, **kwargs: pytest.fail('Unverified document'))
+    with pytest.raises(EdgeCdpTimeout):
+        page.goto('https://mtbp.org/analyse/', timeout=50)
+
+
 def test_local_devtools_http_ignores_enterprise_proxy(monkeypatch):
     from solide._vendor.archer.services.edge_cdp import _http_json
     import urllib.request

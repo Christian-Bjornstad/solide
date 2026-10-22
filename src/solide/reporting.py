@@ -19,6 +19,7 @@ from .report_layout import (VPM_COLORS,vpm_base_sheet,vpm_border,vpm_title,vpm_s
                             vpm_header,vpm_info_row,vpm_put_image)
 from . import __version__
 from .report_language import report_text,capture_caption
+from .report_messages import result_issue
 from .localtime import oslo_now, oslo_datetime, EXCEL_DATETIME_FORMAT
 from .nomenclature import display_identity
 from .annotations import source_row_groups,annotation_group,require_resolved_annotations
@@ -36,6 +37,12 @@ SOURCE_ORDER=('Mutalyzer','SpliceAI','BRCA Exchange','OncoKB','COSMIC','ClinVar'
 
 def source_classification(evidence):
     raw=evidence.get('raw',{})
+    if evidence.get('database')=='ClinVar' and raw.get('classifications'):
+        values=[(label,raw['classifications'][key]) for key,label in
+            [('germline','Arvelig'),('somatic_clinical_impact','Somatisk'),('oncogenicity','Onkogenisitet')]
+            if raw['classifications'].get(key)]
+        if len(values)>1:return '\n'.join(f'{label}: {value}' for label,value in values)
+        if values:return str(values[0][1])
     value=evidence.get('clinical_significance') or raw.get('expert_classification') or raw.get('classification') or ''
     if isinstance(value,dict):return value.get('expert','')
     return str(value)
@@ -826,18 +833,37 @@ def _vpm_compact(variant,source,scoped):
     if not item:return ''
     assessment=assess_evidence(variant,item,scoped).label
     if assessment=='Not applicable':
-        return 'Ikke kjørt' if source=='SpliceAI' else ''
-    if assessment=='No match':return 'Ingen treff'
+        if source=='SpliceAI':return 'Ikke kjørt'
+        if source=='COSMIC' and 'COSMIC-ID' in item.get('summary',''):return 'COSMIC-ID mangler'
+        return 'Ikke aktuelt'
+    if assessment=='No match':
+        if source=='OncoKB' and 'no information for gene' in item.get('summary',''):
+            return 'OncoKB har ingen geninformasjon'
+        if source=='COSMIC':
+            identifier=re.search(r'COS[MV]\d+',str(item.get('accession','')))
+            if identifier:return f'Ingen treff for {identifier[0]}'
+        if source=='ClinVar' and 'exact GRCh37 allele' in item.get('summary',''):
+            return 'Ingen treff på eksakt GRCh37-variant'
+        return 'Ingen treff'
     if assessment=='Outdated':return 'Utdatert'
     raw=item.get('raw',{})
     if source=='Mutalyzer' and evidence_is_current(variant,item,scoped.tissue_for(variant),scoped):
         checked=raw.get('nomenclature_assessment') or {}
         if checked.get('identity_confirmed') is True and checked.get('status') in {'Unchanged','Normalized'}:
             return 'Normalisert' if _vpm_normalized_name(variant,item) else 'Uendret'
-        return 'Kontroller variant'
+        return result_issue(item,assessment)
     if assessment not in {'Verified match','Review match'}:
-        return 'Bilde mangler' if assessment=='Missing capture' else 'Kontroller resultat'
-    assertion=' '.join(source_classification(item).split())
+        identity=raw.get('identity_verification',{})
+        api_verified=(raw.get('assembly_verified')=='GRCh37' and bool(raw.get('matched_location'))
+            or identity.get('accepted') is True and bool(identity.get('requested'))
+               and identity.get('requested')==identity.get('returned'))
+        capture_only=(assessment=='Missing capture' or item.get('status') in {'error','capture_failed'}
+                      and raw.get('failure_stage') in {'summary_capture','result_rendering'})
+        if (api_verified and capture_only and source_classification(item)
+                and assessment not in {'Identity mismatch','Outdated','Ambiguous match'}):
+            return source_classification(item)+'\nBilde mangler'
+        return result_issue(item,assessment)
+    assertion='\n'.join(' '.join(line.split()) for line in source_classification(item).splitlines()).strip()
     if source=='COSMIC':
         identifiers=re.findall(r'COS[MV]\d+',str(item.get('accession','')))
         for key in ('mutation_id','cosmic_id','genomic_mutation_id','legacy_mutation_id'):
@@ -915,7 +941,7 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
     sheet.sheet_properties.tabColor=VPM_COLORS['navy']
     vpm_title(sheet,f'Solide – {analysis.patient}',13)
     vpm_info_row(sheet,3,'Prøve',analysis.patient,end_column=3)
-    vpm_info_row(sheet,4,'Opprettet (Oslo)',generated,end_column=3);sheet.cell(4,3).number_format=EXCEL_DATETIME_FORMAT
+    vpm_info_row(sheet,4,'Opprettet',generated,end_column=3);sheet.cell(4,3).number_format=EXCEL_DATETIME_FORMAT
     sheet.merge_cells('D3:M4')
     sheet.cell(3,4).alignment=Alignment(vertical='top',wrap_text=True)
     for row in sheet.iter_rows(min_row=3,max_row=4,min_col=4,max_col=13):
@@ -974,7 +1000,10 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
         if not _vpm_source_visible(variant,source,scoped):continue
         row=vpm_section(sheet,row,source,source=source)
         label=_vpm_compact(variant,source,scoped)
-        if label:sheet.cell(row-1,1,source+' – '+label)
+        if label:
+            heading=sheet.cell(row-1,1,source+' – '+label)
+            heading.alignment=Alignment(vertical='center',wrap_text=True)
+            sheet.row_dimensions[row-1].height=_text_height([heading.value],[100],24)
         url=_vpm_source_url(variant,source,scoped)
         if url:sheet.cell(row-1,1).hyperlink=url
         anchors[variant.id,source]=(name,row-1)

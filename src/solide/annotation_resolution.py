@@ -8,6 +8,7 @@ from .annotations import (annotation_group,annotation_tokens,annotation_fingerpr
                           annotation_resolution_current)
 from .nomenclature import (normalize_variant,hgvs_query,genomic_query,_transcript,_FULL_HGVS,
                            _GRCH37_REFERENCES,apply_confirmed_normalization)
+from .source_failures import source_failure
 
 _MAX_NAMES=64
 
@@ -47,7 +48,7 @@ def _checked(probe,result):
     gene=data.get('gene_id')
     reference=result.get('reference_identity',{})
     if (not gene and isinstance(reference,dict) and reference.get('status')=='resolved'
-            and reference.get('source')=='NCBI RefSeq' and reference.get('transcript')==probe.transcript):
+            and reference.get('source') in {'NCBI RefSeq','Mutalyzer RefSeq'} and reference.get('transcript')==probe.transcript):
         gene=reference.get('gene')
     contextual=result.get('contextual_normalization',{})
     expected_input=contextual.get('original') if contextual.get('normalization') else result.get('original')
@@ -134,8 +135,10 @@ def resolve_annotation(variant,resolver,*,normalize=None,checkpoint=lambda:None)
                     winners.setdefault(key,(probe,result))
                     # A valid mRNA description already proves this candidate.
                     break
-    except requests.RequestException:
-        return unresolved('Mutalyzer kunne ikke nås. Prøv koblingskontrollen igjen.',attempts=attempts,retryable=True)
+    except requests.RequestException as exc:
+        failure=source_failure('Mutalyzer',exc)
+        return unresolved(failure['summary'],attempts=attempts,retryable=True,
+            failure=failure['raw']['failure'])
     except (ValueError,KeyError,TypeError,AttributeError):
         return unresolved('Ufullstendig svar ved kontroll av annotasjonen.',attempts=attempts)
     if len(winners)!=1:
