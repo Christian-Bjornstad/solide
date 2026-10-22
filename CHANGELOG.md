@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.9 — 22 October 2026
+
+- Extend the ClinVar source image to include its expanded Variant Details panel
+  with identifiers, location, timeline and HGVS table alongside the complete
+  germline/somatic summary. Open collapsed details using the native control.
+- Label the Excel image Klassifikasjon og variantdetaljer and retain the detail
+  text and captured panel metadata without changing source classifications.
+
 ## 0.8.8 — 22 October 2026
 
 - Capture rendered OncoKB and ClinVar result panels without waiting for unrelated

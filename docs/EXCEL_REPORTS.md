@@ -117,8 +117,12 @@ in [RAPPORTSVAR.md](RAPPORTSVAR.md).
 
 OncoKB screenshots cover the returned variant header, overview and complete
 mutation-effect tiles. ClinVar screenshots cover the variant title and the entire
-germline/somatic summary. Captures wait for fonts and stable layout, and are
-retried if geometry changes while the browser takes the image.
+germline/somatic summary together with the expanded Variant Details panel:
+identifiers, type/length, GRCh37/GRCh38 location, timeline, HGVS table and the
+remaining native detail fields. Collapsed details are opened through ClinVar's
+own control. The report caption is Klassifikasjon og variantdetaljer. Required
+panels must be visible and their geometry stable before and after capture;
+unrelated unfinished document resources do not block a rendered result.
 
 ## SpliceAI
 

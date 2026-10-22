@@ -1037,7 +1037,7 @@ class BrowserReviewService:
         *,
         progress: Callable[[str], None] | None,
     ) -> dict[str, DatabaseEvidence]:
-        """Resolve ClinVar through E-utilities, then capture its summary card."""
+        """Resolve ClinVar through E-utilities, then capture classifications and details."""
         from solide._vendor.archer.services.database_search import DatabaseSearchService
         from solide._vendor.archer.services.settings import AppSettings
 
@@ -1128,11 +1128,15 @@ class BrowserReviewService:
         page: Any,
         artifact_directory: Path,
     ) -> DatabaseEvidence:
-        self._wait_for_clinvar_result(page)
         title = page.locator("main div.functions-container")
         summary = page.locator("#germline-somatic-info")
         title.wait_for(state="visible", timeout=self.navigation_timeout_ms)
         summary.wait_for(state="visible", timeout=self.navigation_timeout_ms)
+        details = page.locator('#variant-details-table')
+        if not details.is_visible():
+            page.locator('#new-variant-details .new-icon-down').click()
+        details.wait_for(state='visible', timeout=self.navigation_timeout_ms)
+        self._wait_for_clinvar_result(page)
         screenshot_path = self._screenshot_path(
             artifact_directory, "ClinVar", variant
         )
@@ -1151,10 +1155,12 @@ class BrowserReviewService:
             raw={
                 **api_evidence.raw,
                 "classification_summary": summary_text,
+                "variant_details": state['details_text'],
+                "clinvar_capture": {"version": 2, "panels": ["classification_summary", "variant_details"]},
                 "screenshot": str(screenshot_path),
                 "screenshots": [
                     {
-                        "label": "Classification summary",
+                        "label": "Classification summary and variant details",
                         "path": str(screenshot_path),
                         "url": page.url,
                     }

@@ -6,9 +6,15 @@ CLINVAR_PANEL_JS = '''() => {
     window.scrollTo(0,0);
     const title=document.querySelector('main div.functions-container');
     const summary=document.querySelector('#germline-somatic-info');
-    const boxes=[title,summary].map(el=>el?.getBoundingClientRect());
-    return {ready:document.readyState!=='loading',
+    const details=document.querySelector('#new-variant-details');
+    const table=document.querySelector('#variant-details-table');
+    const detailsVisible=table?.getBoundingClientRect().height>0;
+    const detailsText=detailsVisible?table.innerText:'';
+    const boxes=[title,summary,details,table].map(el=>el?.getBoundingClientRect());
+    return {ready:document.readyState!=='loading' && detailsVisible &&
+            ['Variation ID:', 'Location', 'Timeline in ClinVar', 'HGVS'].every(label=>detailsText.includes(label)),
         document_state:document.readyState,font_state:document.fonts?.status,
+        details_text:detailsText,
         text:summary?.innerText||'',clip:boxes.every(b=>b?.width>0 && b?.height>0)?{
             x:Math.min(...boxes.map(b=>b.left)),y:Math.min(...boxes.map(b=>b.top)),
             width:Math.max(...boxes.map(b=>b.right))-Math.min(...boxes.map(b=>b.left)),

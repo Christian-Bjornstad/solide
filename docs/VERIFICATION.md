@@ -2,6 +2,33 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## Expanded ClinVar source image — 22 October 2026, v0.8.9
+
+ClinVar images now include the complete germline/somatic classification summary
+and the expanded Variant Details panel. The crop retains identifiers, variation
+ID/accession, type/length, both genome locations, timeline, native HGVS table and
+the remaining detail fields. The caption is Klassifikasjon og variantdetaljer.
+Classifications still come from the same independently verified VCV aggregate;
+detail text and panel metadata are retained separately.
+
+A background production-provider run captured the requested TP53 c.749C>T
+(VCV000420136.17) and TERT c.-124C>T (VCV001299388.42). On TERT, the native
+detail panel was deliberately collapsed and successfully reopened before
+readiness/capture. The site's handlers are attached to the arrow icon itself;
+clicking its wrapping link does not expand the panel. Native section controls
+are used without changing source content. Both API assertions and genomic
+identity checks were preserved. Images extracted from the production export
+were visually checked, and an independently verified Excel process opened the
+workbook read-only with both images and no repair. Native Excel PDF previews
+were used only for local visual inspection; output remains Excel.
+
+**71 targeted tests passed:** 64 capture/source/report tests, four ClinVar
+Archer-parity checks and three opt-in managed Edge tests. Regressions cover the
+expanded crop bounds, missing/collapsed details, required detail fields, the
+native arrow event target, unchanged API classification, Norwegian caption and
+unrelated pending resources. The full suite was not rerun. Older exported
+workbooks are unchanged; rerun ClinVar to obtain the extended image.
+
 ## Rendered OncoKB results and capture recovery — 22 October 2026, v0.8.8
 
 The next supplied workbook contained ten selected interpretations and 186 source

@@ -22,6 +22,7 @@ TEXT={
     'Access required':'Tilgang kreves','Quota reached':'Kvoten er brukt opp','Rate limited':'For mange søk',
     'Review query':'Kontroller søket','Submission uncertain':'Uavklart innsending','Deferred':'Utsatt',
     'Provider evidence':'Kildebilde','Classification summary':'Klassifikasjon',
+    'Classification summary and variant details':'Klassifikasjon og variantdetaljer',
     'Classification evidence':'Klassifikasjon','Variant overview and mutation effect':'Variant og mutasjonseffekt',
     'Franklin classification and ACMG evidence':'Franklin-klassifikasjon og ACMG-evidens',
     'Full ACMG classification page':'ACMG-klassifikasjon','ACMG classification overview':'ACMG-oversikt',

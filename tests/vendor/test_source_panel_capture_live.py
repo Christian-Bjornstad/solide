@@ -22,6 +22,16 @@ body {font:16px Arial;margin:32px} .alterationTiles {width:800px;padding:20px;bo
 <div class="alterationTiles"><div><h3>Mutation Effect</h3><p>Oncogenicity</p>
 <p>Unknown Oncogenic Effect</p></div></div></section>
 <section id="germline-somatic-info">Germline classification: Benign</section>
+<section id="new-variant-details"><h3>Variant Details
+<a><i class="new-icon-down" onclick="document.querySelector('#variant-details-table').style.display='block'"></i></a>
+</h3><div id="variant-details-table">
+<dl><dt>Identifiers</dt><dd>Variation ID: 1 Accession: VCV000000001.1</dd>
+<dt>Type and length</dt><dd>single nucleotide variant, 1 bp</dd>
+<dt>Location</dt><dd>17:7578406 (GRCh37)</dd>
+<dt>Timeline in ClinVar</dt><dd>First in ClinVar; Last submission; Last evaluated</dd>
+<dt>HGVS</dt><dd><table><tr><th>Nucleotide</th><th>Protein</th></tr>
+<tr><td>NM_000546.6:c.524G&gt;A</td><td>p.Arg175His</td></tr></table></dd>
+<dt>Protein change</dt><dd>R175H</dd></dl></div></section>
 <p style="font-family:Pending">Unrelated footer font</p><img src="/stall-image"></main></body></html>'''
 
 
@@ -63,3 +73,36 @@ def test_native_panels_capture_while_unrelated_image_and_font_are_pending(tmp_pa
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_clinvar_crop_includes_expanded_variant_details_and_rejects_incomplete_panels(tmp_path,monkeypatch):
+    from urllib.parse import quote
+    from pathlib import Path
+    from solide._vendor.archer.core.models import DatabaseEvidence,VariantRecord
+    from solide._vendor.archer.services.browser_review import BrowserReviewService
+    with sync_edge_cdp() as runtime:
+        context=runtime.chromium.launch_persistent_context(str(tmp_path/'profile'),background=True)
+        page=context.pages[0] if context.pages else context.new_page()
+        # Keep this geometry test self-contained; the pending-resource test
+        # above separately exercises the same native section structure.
+        html=HTML.decode().replace('/stall-font','data:font/woff2;base64,AA==').replace('/stall-image','')
+        page.goto('data:text/html,'+quote(html))
+        state=page.evaluate(CLINVAR_PANEL_JS)
+        bottom=page.evaluate('() => document.querySelector("#new-variant-details").getBoundingClientRect().bottom')
+        assert state['clip']['y']+state['clip']['height']>=bottom
+        assert 'Variation ID: 1' in state['details_text']
+        assert 'Last evaluated' in state['details_text'] and 'NM_000546.6:c.524G>A' in state['details_text']
+        page.evaluate('document.querySelector("#variant-details-table").style.display="none"')
+        assert not page.evaluate(CLINVAR_PANEL_JS)['ready']
+        service=BrowserReviewService(profile_root=tmp_path)
+        def readiness(_):assert page.locator('#variant-details-table').is_visible()
+        monkeypatch.setattr(service,'_wait_for_clinvar_result',readiness)
+        evidence=service._capture_clinvar_result(
+            VariantRecord(Path('synthetic.tsv'),1,'SOURCE','TP53','NM_000546.6:c.524G>A'),
+            DatabaseEvidence('ClinVar','found',clinical_significance='Benign',
+                             raw={'classifications':{'germline':'Benign'}}),page,tmp_path)
+        assert 'NM_000546.6:c.524G>A' in evidence.raw['variant_details']
+        page.evaluate("[...document.querySelectorAll('#variant-details-table dt')].find(el=>el.innerText==='HGVS').remove()")
+        assert not page.evaluate(CLINVAR_PANEL_JS)['ready']
+        page.evaluate('document.querySelector("#new-variant-details").remove()')
+        assert page.evaluate(CLINVAR_PANEL_JS)['clip'] is None
