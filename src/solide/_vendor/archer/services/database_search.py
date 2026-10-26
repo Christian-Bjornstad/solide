@@ -481,6 +481,10 @@ class DatabaseSearchService:
                            f"{identity.alternate}(GRCh37)")
         if variant.hgvsc:
             queries.append(f"{variant.hgvsc}[VARNAME]")
+            # HGVS aliases (notably indels) can be absent from the VARNAME
+            # index while present as an exact phrase. Candidates still require
+            # independent GRCh37 position AND REF/ALT confirmation.
+            queries.append('"'+variant.hgvsc+'"')
         queries.extend(
             identifier
             for identifier in re.findall(

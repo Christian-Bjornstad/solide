@@ -21,6 +21,7 @@ from .import_dialog import SampleImportDialog,OumLineEdit
 from .sample_identity import normalize_oum,valid_oum
 from .importing import load_file
 from .quality import qc_flags, review_reasons
+from .proximity import nearby_variants,igv_message
 from .session import load_session, atomic_write
 from .table_model import VariantTableModel, VariantProxy, SpreadsheetView
 from .reporting import export_analysis, STATUS
@@ -185,7 +186,7 @@ class MainWindow(QMainWindow):
         self.session=Session();self.session_path=None;self.dirty=False;self.active_analysis_id=None
         self.active=None;self.workers=[];self.control=None;self.current_variant=None
         self.run_plan=set();self.run_done=set();self.run_id=None;self.run_started=0;self.run_state='Idle'
-        self.run_history_saved=set()
+        self.run_history_saved=set();self.igv_acknowledged=set()
         self.temporary_workspace=tempfile.TemporaryDirectory(prefix='solide-')
         try:self.activity=ActivityLog(Path(self.temporary_workspace.name)/'activity.log')
         except OSError:self.activity=None
@@ -764,7 +765,8 @@ class MainWindow(QMainWindow):
         self.next_btn.setEnabled(bool(selected) and not self.active)
         if self.nav.currentRow()==0:self.summary.setText(f'{len(self.session.analyses)} files · {len(source_row_groups(self.session.variants)):,} rows')
         else:self.summary.setText(f'{total:,} rows · {selected} selected'+(f' · {visible} shown' if visible<total else ''))
-        self.selection_summary.setText(f'{selected} varianter valgt')
+        self.selection_summary.setText(f'{selected} varianter valgt · Oransje: sjekk IGV (≤100 bp)')
+        self.selection_summary.setToolTip('Lilla: overlappende annotasjoner. Oransje: valgte, ulike varianter i samme gen innen 100 bp – vurder cis/trans i IGV.')
 
     def apply_filter(self,*args):
         self.proxy.candidates_only=not self.show_all_rows.isChecked()
@@ -800,6 +802,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def mark_dirty(self):
+        self.variant_model.refresh_proximity()
         self.dirty=True;self.refresh_counts();self.refresh_evidence();self.update_sources_summary()
 
     def show_variant(self,index,*args):
@@ -824,6 +827,8 @@ class MainWindow(QMainWindow):
                *[f'{f.category}: {f.status} – {f.message}' for f in qc_flags(v)],
                f'\nClassification: {v.classification or "Pending"} · Report: {v.report_decision}',
                f'Reviewer: {v.reviewer or "—"}', '\nAssessment: '+v.comment]
+        if v.id in self.variant_model.nearby:
+            lines.insert(0,igv_message(v,self.variant_model.nearby[v.id]))
         for source,e in v.evidence.items():
             state=STATUS.get(e.get('status'),e.get('status','Unknown')) if evidence_is_current(v,e,self.session.tissue_for(v),self.session) else 'Outdated'
             lines.append(f'\n{source}: {state}\n{e.get("summary", "")}')
@@ -1100,6 +1105,17 @@ class MainWindow(QMainWindow):
             self.banner.setText('Velg minst én database.');return
         plan=build_search_plan(scope,sources,mode,chosen)
         if not plan:self.banner.setText('No searches to run');self.record_activity(f'{mode}: no searches to run');return
+        neighbours=nearby_variants(scope.variants)
+        signature=tuple(sorted((v.id,v.gene,v.locus,v.ref,v.alt,tuple(sorted(other.id for other,_ in neighbours[v.id])))
+            for v in scope.variants if v.id in neighbours))
+        if signature and signature not in self.igv_acknowledged:
+            lines=[igv_message(v,neighbours[v.id]) for v in scope.variants if v.id in neighbours]
+            choice=QMessageBox.question(self,'Sjekk IGV før databasesøk',
+                '\n\n'.join(lines)+'\n\nFortsette med databasesøket?',
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
+            if choice!=QMessageBox.StandardButton.Yes:return
+            self.igv_acknowledged.add(signature)
+            self.record_activity('IGV-varsel bekreftet for nærliggende valgte varianter (≤100 bp).')
         root=self.work_root()
         if root is None:return
         if not sources:self.notify_error('Select at least one source.');return

@@ -14,7 +14,7 @@ def test_capture_retries_when_late_layout_changes_between_measurement_and_screen
         def wait_for_timeout(self,ms):pass
     page=Page();path=tmp_path/'capture.png'
     result=capture_source_panel(page,path,'test',timeout_ms=1000)
-    assert [call['clip']['y'] for call in page.calls]==[100,300]
+    assert [call['clip']['y'] for call in page.calls]==[98,298]
     assert result['clip']['y']==300
 
 
@@ -46,3 +46,19 @@ def test_capture_timeout_keeps_layout_diagnostics_without_source_text(tmp_path):
     assert failure.value.diagnostics['last_state']['clip'] is None
     assert failure.value.diagnostics['required_text_present'] == [False]
     assert 'private source details' not in str(failure.value.diagnostics)
+
+
+def test_capture_tolerates_subpixel_dpi_jitter_without_accepting_real_layout_changes(tmp_path):
+    class Page:
+        reads=0;calls=[]
+        def evaluate(self,script):
+            self.reads+=1
+            return {'ready':True,'clip':{'x':74.046875+(self.reads%2)*0.2,
+                'y':124,'width':1299.90625,'height':606.359375},'text':'Likely Oncogenic'}
+        def screenshot(self,**kwargs):self.calls.append(kwargs)
+        def wait_for_timeout(self,ms):pass
+    page=Page()
+    capture_source_panel(page,tmp_path/'capture.png','test',timeout_ms=20,required_text=['Likely Oncogenic'])
+    assert len(page.calls)==1
+    clip=page.calls[0]['clip']
+    assert clip['x']<=74.046875 and clip['x']+clip['width']>=1374.16

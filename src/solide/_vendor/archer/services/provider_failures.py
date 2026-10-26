@@ -6,6 +6,7 @@ from enum import StrEnum
 class ProviderFailureKind(StrEnum):
     NOT_FOUND = "not_found"
     LOGIN_REQUIRED = "login_required"
+    VERIFICATION_REQUIRED = "verification_required"
     LAYOUT_CHANGED = "layout_changed"
     AMBIGUOUS = "ambiguous"
     IDENTITY_MISMATCH = "identity_mismatch"

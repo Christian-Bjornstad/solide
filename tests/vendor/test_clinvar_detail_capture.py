@@ -15,6 +15,7 @@ def test_clinvar_capture_opens_details_and_retains_api_classification(tmp_path, 
     class Locator:
         def __init__(self,selector):self.selector=selector
         def is_visible(self):return visible[0]
+        def inner_text(self,**kwargs):return 'ClinVar result'
         def wait_for(self,**kwargs):
             if self.selector=='#variant-details-table':assert visible[0]
         def click(self):
@@ -40,3 +41,14 @@ def test_clinvar_capture_opens_details_and_retains_api_classification(tmp_path, 
     assert result.raw['clinvar_capture']['panels']==['classification_summary','variant_details']
     assert len(result.raw['screenshots'])==1
     assert capture_caption(result.raw['screenshots'][0]['label'])=='Klassifikasjon og variantdetaljer'
+
+
+def test_clinvar_browser_verification_is_not_no_hit_or_a_layout_error(tmp_path):
+    from solide._vendor.archer.services.provider_failures import ProviderLookupError
+    service=browser_review.BrowserReviewService(profile_root=tmp_path)
+    page=SimpleNamespace(locator=lambda _:SimpleNamespace(inner_text=lambda **_:
+        'Checking your browser before accessing www.ncbi.nlm.nih.gov ...'))
+    with pytest.raises(ProviderLookupError) as exc:
+        service._capture_clinvar_result(None,None,page,tmp_path)
+    assert exc.value.kind.value=='verification_required'
+    assert exc.value.diagnostics['capture_issue']=='browser_verification'

@@ -697,12 +697,12 @@ def test_cosmic_cache_requires_the_same_requested_variant(tmp_path, monkeypatch)
     assert calls == ["A", "T"]
 
 
-def test_cosmic_without_identifier_does_not_open_a_browser(tmp_path, monkeypatch):
+def test_cosmic_without_identifier_or_gene_cdna_does_not_open_a_browser(tmp_path, monkeypatch):
     service = BrowserReviewService(profile_root=tmp_path)
     monkeypatch.setattr(service, "_browser_api", lambda: pytest.fail("No identifier is available for this provider"))
-    requested = mtbp_variant()
+    requested = replace(mtbp_variant(), hgvsc='')
     results = service._search_cosmic([requested], tmp_path, progress=None)
-    assert results[service.variant_key(requested)].status == "not_applicable"
+    assert results[service.variant_key(requested)].status == "invalid_query"
 
 
 def test_interleaved_retained_reports_restore_the_correct_page_before_capture(tmp_path, monkeypatch):

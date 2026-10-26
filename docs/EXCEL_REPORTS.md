@@ -10,8 +10,11 @@ The default export is one versioned Excel workbook, following the pinned Archer
 patient writer's layout, colours, source order and original image placement:
 
 - **Oversikt**: navy title rows 1–2, sample/date rows 3–4, section row 6 and
-  filterable findings from row 8. The merged D3:M4 box and Comment cells are
-  blank for manual Excel notes. Gene names are plain text, with no worksheet links.
+  filterable findings from row 8. The merged D3:M4 box remains blank for manual
+  notes. Column E, Rapporttekst, contains copyable versioned reference, gene,
+  nucleotide change, available protein and COSMIC ID; this is repeated in row 4
+  of each variant sheet. Unknown proteins and empty identifier parentheses are
+  omitted. Gene names are plain text, with no worksheet links.
 - Source columns show the actual source content: MTBP functional relevance and
   evidence level, Franklin/ClinVar classifications, OncoKB oncogenicity, COSMIC
   identifiers and BRCA expert classification. Only current usable source records
@@ -112,7 +115,11 @@ Operational cells identify access, authentication, network, profile, layout,
 identity and capture failures. Independently verified source assertions remain
 visible with Bilde mangler when only capture fails; conflicting identities never
 inherit this exception. COSMIC's exact-ID empty search is a no-hit, while a missing
-COSMIC ID is explicitly a skipped search. The complete Norwegian message list is
+COSMIC ID triggers a gene/cDNA syntax search when those fields are available.
+Only one exact syntax candidate may be selected; its gene, CDS and GRCh37 event
+span must match before capture. COSMIC's gene/CDS evidence remains a Review match
+because the native overview does not independently expose genomic REF/ALT.
+Multiple exact candidates are reported as ambiguous. The complete Norwegian message list is
 in [RAPPORTSVAR.md](RAPPORTSVAR.md).
 
 OncoKB screenshots cover the returned variant header, overview and complete
@@ -123,6 +130,11 @@ remaining native detail fields. Collapsed details are opened through ClinVar's
 own control. The report caption is Klassifikasjon og variantdetaljer. Required
 panels must be visible and their geometry stable before and after capture;
 unrelated unfinished document resources do not block a rendered result.
+
+Before database searches, the app highlights selected, distinct sequence events
+within 100 bp in the same gene and analysis and asks for an IGV check. This is a
+reminder to inspect whether variants share an allele; distance alone establishes
+neither cis nor trans. The warning does not change the variants or database query.
 
 ## SpliceAI
 

@@ -106,3 +106,22 @@ def test_clinvar_crop_includes_expanded_variant_details_and_rejects_incomplete_p
         assert not page.evaluate(CLINVAR_PANEL_JS)['ready']
         page.evaluate('document.querySelector("#new-variant-details").remove()')
         assert page.evaluate(CLINVAR_PANEL_JS)['clip'] is None
+
+
+@pytest.mark.parametrize('scale',[1,1.25,1.5])
+def test_capture_stabilizes_animation_and_scrollbars_at_workstation_dpi(tmp_path,scale):
+    from urllib.parse import quote
+    with sync_edge_cdp() as runtime:
+        context=runtime.chromium.launch_persistent_context(str(tmp_path/'profile'),background=True)
+        page=context.pages[0] if context.pages else context.new_page()
+        page._connection.call('Emulation.setDeviceMetricsOverride',
+            {'width':1440,'height':1000,'deviceScaleFactor':scale,'mobile':False})
+        html=HTML.decode().replace('/stall-font','data:font/woff2;base64,AA==').replace('/stall-image','')
+        html=html.replace('</style>','@keyframes wobble {from{transform:translateX(0)}to{transform:translateX(.4px)}} body {animation:wobble .3s infinite alternate linear}</style>')
+        page.goto('data:text/html,'+quote(html))
+        assert page.evaluate("getComputedStyle(document.body).animationName")=='wobble'
+        image=tmp_path/'dpi.png'
+        result=capture_source_panel(page,image,CLINVAR_PANEL_JS,timeout_ms=3000,required_text=['Benign'])
+        assert 'HGVS' in result['details_text'] and image.stat().st_size>1000
+        assert not page.evaluate("!!document.getElementById('solide-static-source-capture')")
+        assert page.evaluate("getComputedStyle(document.body).animationName")=='wobble'

@@ -8,7 +8,7 @@ reviews are not part of the installation package.
 
 Extract the complete new package into a separate folder and run its
 **SOLIDE_START.cmd**. The bootstrap selects that folder's source code before any
-older editable installation. Version 0.8.9 adds no dependencies; when the existing
+older editable installation. Version 0.8.10 adds no dependencies; when the existing
 installation already works, reinstalling packages is unnecessary. Check the
 version in the window title. Use SOLIDE_INSTALL.cmd only for a first installation
 or missing dependencies.

@@ -16,7 +16,7 @@ def test_app_text_is_norwegian_but_source_assertions_and_raw_headers_are_unchang
     with closing(load_workbook(export_analysis(Session(analyses=[a],variants=[v]),'a',tmp_path).report)) as book:
         assert book.sheetnames==['Oversikt','EGFR','Kilder','Rådata']
         assert book['Oversikt']['A4'].value=='Opprettet'
-        assert [c.value for c in book['Oversikt'][7]][:5]==['Gen','HGVSc','HGVSp','Kildefunn','Kommentar']
+        assert [c.value for c in book['Oversikt'][7]][:5]==['Gen','HGVSc','HGVSp','Kildefunn','Rapporttekst']
         assert book['Oversikt']['G8'].value=='Ikke kjørt'
         assert book['Oversikt']['M8'].value=='Bilde mangler'
         assert book['Rådata']['A1'].value=='Gene'

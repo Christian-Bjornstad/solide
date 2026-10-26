@@ -54,6 +54,14 @@ def test_verified_api_classification_is_retained_when_only_image_is_missing():
     assert _vpm_compact(v,'ClinVar',session)=='Bilde mangler'
 
 
+def test_clinvar_browser_verification_keeps_verified_assertion_and_specific_image_reason():
+    session,rows=make_session(Variant(gene='BRCA2',selected=True));v=rows[0]
+    v.evidence['ClinVar']=result(v,source='ClinVar',status='verification_required',clinical_significance='Pathogenic',
+        raw={'assembly_verified':'GRCh37','matched_location':{'position':32913708},
+             'failure_stage':'summary_capture','capture_issue':'browser_verification'})
+    assert _vpm_compact(v,'ClinVar',session)=='Pathogenic\nBilde mangler\nNettleserkontroll kreves'
+
+
 def test_rejected_identity_never_leaks_a_retained_api_classification():
     session,rows=make_session(Variant(gene='TERT',selected=True));v=rows[0]
     v.evidence['ClinVar']=result(v,source='ClinVar',status='error',clinical_significance='Pathogenic',

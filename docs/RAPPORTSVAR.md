@@ -25,6 +25,7 @@ ellers viser oversikten «Bilde mangler» frem til kildebildet kan hentes på ny
 | Maks. delta 0.xxx | Høyeste returnerte SpliceAI-deltaskår. |
 | Arvelig: … / Somatisk: … / Onkogenisitet: … | ClinVars separate, samlede klassifikasjoner, vist på hver sin linje når flere finnes. Underposters eller enkeltinnsenderes vurderinger erstatter ikke den samlede vurderingen. |
 | Databasens vurdering + Bilde mangler | Kildesvaret er uavhengig bekreftet, men bildet mangler. Teksten vises på separate linjer. |
+| Databasens vurdering + Bilde mangler + Nettleserkontroll kreves | ClinVar-API-et bekreftet varianten, men NCBIs nettleserkontroll hindret bildet. Ingen kontrollside brukes som kildebilde. |
 
 ## Ikke kjørt eller ikke aktuelt
 
@@ -32,7 +33,7 @@ ellers viser oversikten «Bilde mangler» frem til kildebildet kan hentes på ny
 |---|---|
 | Tom celle | Ingen registrert søking i denne databasen. |
 | Ikke kjørt | SpliceAI er ikke aktuelt etter utvalgsregelen for intronvarianter. |
-| COSMIC-ID mangler | Raden mangler COSM-/COSV-ID. Dette er ikke et gjennomført søk uten treff. |
+| COSMIC-ID mangler | Eldre resultat uten COSM-/COSV-ID. Et nytt COSMIC-søk bruker nå gen/HGVSc når dette er tilgjengelig. |
 | Ikke aktuelt | Kilden gjelder ikke den valgte varianten. |
 | Søket er utsatt | Kilden har utsatt oppslaget. |
 | Manuelt søk kreves | Kilden krever manuelt oppslag. |

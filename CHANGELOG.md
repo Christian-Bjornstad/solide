@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.10 — 26 October 2026
+
+- Search COSMIC by gene/cDNA when no COSM/COSV identifier is supplied. Select
+  only one exact native syntax result and check its gene, CDS and GRCh37 span;
+  ambiguous, mismatching and unfinished searches remain explicit outcomes.
+- Add a quoted HGVS ClinVar query for aliases missing from the VARNAME index.
+  Every candidate still requires the exact GRCh37 position and both alleles.
+- Stabilize source capture against animation/scrollbar reflow and subpixel DPI
+  jitter, with a padded crop and layout checks before and after the screenshot.
+- Show copyable Rapporttekst in the overview and every variant sheet, using
+  the reviewed identity and available matching COSMIC identifier.
+- Mark selected, distinct same-gene events within 100 bp in orange and show an
+  IGV reminder before database searches. This is a phasing prompt, not a cis/trans
+  conclusion; overlapping annotations retain their existing purple colour.
+- Distinguish ClinVar browser verification from no-hit/layout failures and retain
+  independently verified API classifications when the website image is blocked.
+
 ## 0.8.9 — 22 October 2026
 
 - Extend the ClinVar source image to include its expanded Variant Details panel

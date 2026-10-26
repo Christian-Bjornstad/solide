@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
 from solide._vendor.archer.core.models import DatabaseEvidence, VariantRecord
 from solide._vendor.archer.services.source_panel_capture import capture_source_panel, CLINVAR_PANEL_JS, ONCOKB_PANEL_JS
+from solide._vendor.archer.services.cosmic_syntax import gene_cdna_query,syntax_candidates,syntax_page_identity
 from solide._vendor.archer.services.genomic_notation import format_mtbp_grch37, normalize_vcf_change
 from solide._vendor.archer.services.mtbp_report_dom import MTBP_TABLE_ROWS_JS
 from solide._vendor.archer.services.capture_layout import expanded_capture_layout
@@ -186,7 +187,7 @@ class BrowserReviewService:
     def query_url(self, database: str, variant: VariantRecord) -> str:
         self._validate_database(database)
         if database == "COSMIC":
-            cosmic_id = _cosmic_identifier(variant.cosmic_id)
+            cosmic_id = _cosmic_identifier(variant.cosmic_id) or gene_cdna_query(variant)
             if not cosmic_id:
                 return ""
             return (
@@ -689,13 +690,13 @@ class BrowserReviewService:
     ) -> dict[str, DatabaseEvidence]:
         """Capture the licensed COSMIC mutation page by Archer COSMICID."""
         searchable_variants = [
-            variant for variant in variants if _cosmic_identifiers(variant.cosmic_id)
+            variant for variant in variants if self.query_url('COSMIC',variant)
         ]
         results: dict[str, DatabaseEvidence] = {
             self.variant_key(variant): DatabaseEvidence(
                 "COSMIC",
-                "not_applicable",
-                "COSMIC-ID mangler",
+                "invalid_query",
+                "COSMIC-ID eller entydig gen/HGVSc mangler.",
                 accession=variant.cosmic_id,
                 raw={
                     "failure_kind": ProviderFailureKind.NOT_FOUND.value,
@@ -703,7 +704,7 @@ class BrowserReviewService:
                 },
             )
             for variant in variants
-            if not _cosmic_identifiers(variant.cosmic_id)
+            if not self.query_url('COSMIC',variant)
         }
         if not searchable_variants:
             return results
@@ -746,7 +747,7 @@ class BrowserReviewService:
                     if progress:
                         progress(
                             f"COSMIC browser lookup {index}/{len(searchable_variants)}: "
-                            f"{variant.cosmic_id}"
+                            f"{variant.cosmic_id or gene_cdna_query(variant)}"
                         )
                     try:
                         results[key] = self._lookup_cosmic_variant(
@@ -784,16 +785,7 @@ class BrowserReviewService:
     ) -> DatabaseEvidence:
         identifiers = _cosmic_identifiers(variant.cosmic_id)
         if not identifiers:
-            return DatabaseEvidence(
-                "COSMIC",
-                "not_applicable",
-                "COSMIC-ID mangler",
-                accession=variant.cosmic_id,
-                raw={
-                    "failure_kind": ProviderFailureKind.NOT_FOUND.value,
-                    "query_attempts": [],
-                },
-            )
+            return self._lookup_cosmic_syntax(page,variant,artifact_directory)
         attempts: list[str] = []
         attempt_results: list[dict[str, str]] = []
         last_result: DatabaseEvidence | None = None
@@ -851,6 +843,53 @@ class BrowserReviewService:
             raw={"failure_kind": ProviderFailureKind.NOT_FOUND.value},
         )
 
+
+    def _lookup_cosmic_syntax(self,page,variant,artifact_directory):
+        query=gene_cdna_query(variant)
+        if not query:
+            return DatabaseEvidence('COSMIC','invalid_query','COSMIC-ID eller entydig gen/HGVSc mangler.')
+        attempts=[query]
+        try:
+            page.goto(self.query_url('COSMIC',variant),wait_until='domcontentloaded',timeout=self.navigation_timeout_ms)
+            candidates=[]
+            search_complete=False
+            for _ in range(max(1,self.navigation_timeout_ms//500)):
+                self._check_cancelled();self._raise_for_cosmic_terminal_page(page)
+                rows=page.locator("a[href*='/cosmic/mutation/overview']").evaluate_all("""nodes=>nodes.map(n=>({
+                    gene:n.closest('tr')?.querySelector('td')?.innerText||'',syntax:n.innerText,url:n.href}))""")
+                candidates=syntax_candidates(rows,variant)
+                body=page.locator('body').inner_text()
+                search_complete=bool(rows) or bool(re.search(r'did not return any results|\bMutations\s*\(0\)',body,re.I))
+                if search_complete:break
+                page.wait_for_timeout(500)
+            if not search_complete:
+                raise ProviderLookupError(ProviderFailureKind.TRANSIENT,'COSMIC-søkeresultatet ble ikke ferdig lastet.')
+            if len(candidates)!=1:
+                return DatabaseEvidence('COSMIC','ambiguous_result' if candidates else 'not_found',
+                    'Flere eksakte COSMIC-syntakstreff; ingen valgt.' if candidates else 'Ingen eksakte treff på gen/HGVSc.',
+                    accession=query,url=page.url,raw={'query_attempts':attempts,'exact_syntax_hits':len(candidates)})
+            page.goto(candidates[0],wait_until='domcontentloaded',timeout=self.navigation_timeout_ms)
+            self._ensure_cosmic_grch37(page);self._verify_cosmic_grch37(page)
+            self._wait_for_cosmic_result(page)
+            overview=self._cosmic_section(page,'Overview').inner_text()
+            if not syntax_page_identity(overview,variant):
+                return DatabaseEvidence('COSMIC','identity_mismatch',
+                    'COSMIC-treffet samsvarer ikke med gen, HGVSc og genomisk posisjon.',accession=query,url=page.url,
+                    raw={'failure_kind':'identity_mismatch','query_attempts':attempts})
+            identifiers=[]
+            for label in ('Legacy Identifier','Genomic Mutation ID'):
+                match=re.search(label+r'\s+(COS[MV]\d+)',overview)
+                if match:identifiers.append(match[1])
+            if not identifiers:
+                raise ProviderLookupError(ProviderFailureKind.LAYOUT_CHANGED,'COSMIC-treffet mangler en lesbar variant-ID.')
+            result=self._capture_cosmic_result(replace(variant,cosmic_id=identifiers[0]),page,artifact_directory)
+            result.accession=', '.join(identifiers)
+            result.raw.update(query_attempts=attempts,query_basis='gene_cdna',matched_identifiers=identifiers,
+                              source_match={'gene_cdna':query,'genomic_span_checked':True})
+            return result
+        except ProviderLookupError as exc:
+            return DatabaseEvidence('COSMIC',exc.kind.value,str(exc),accession=query,url=page.url,
+                raw={'failure_kind':exc.kind.value,'query_attempts':attempts,**exc.diagnostics})
 
     def _lookup_cosmic_with_retry(
         self,
@@ -1092,7 +1131,7 @@ class BrowserReviewService:
                     except Exception as exc:
                         results[key] = DatabaseEvidence(
                             database="ClinVar",
-                            status="error",
+                            status=(exc.kind.value if isinstance(exc,ProviderLookupError) else 'error'),
                             summary=f"ClinVar summary capture failed: {exc}",
                             accession=api_evidence.accession,
                             clinical_significance=api_evidence.clinical_significance,
@@ -1104,7 +1143,7 @@ class BrowserReviewService:
                                     else "summary_capture"
                                 ),
                                 "failure_kind": (
-                                    ProviderFailureKind.TRANSIENT.value
+                                    exc.kind.value if isinstance(exc,ProviderLookupError) else ProviderFailureKind.TRANSIENT.value
                                     if _transient_browser_failure(exc)
                                     else ProviderFailureKind.LAYOUT_CHANGED.value
                                 ),
@@ -1128,6 +1167,11 @@ class BrowserReviewService:
         page: Any,
         artifact_directory: Path,
     ) -> DatabaseEvidence:
+        body=page.locator('body').inner_text(timeout=self.navigation_timeout_ms)
+        if 'checking your browser before accessing' in body.casefold():
+            raise ProviderLookupError(ProviderFailureKind.VERIFICATION_REQUIRED,
+                'ClinVar krever nettleserkontroll. Åpne kilden og prøv igjen etter bekreftelse.',
+                diagnostics={'failure_kind':'verification_required','capture_issue':'browser_verification'})
         title = page.locator("main div.functions-container")
         summary = page.locator("#germline-somatic-info")
         title.wait_for(state="visible", timeout=self.navigation_timeout_ms)

@@ -22,6 +22,7 @@ from .report_language import report_text,capture_caption
 from .report_messages import result_issue
 from .localtime import oslo_now, oslo_datetime, EXCEL_DATETIME_FORMAT
 from .nomenclature import display_identity
+from .report_identity import report_variant_text
 from .annotations import source_row_groups,annotation_group,require_resolved_annotations
 
 STATUS={'found':'Found','verified':'Verified','not_found':'Not found','not_applicable':'Not applicable',
@@ -857,11 +858,12 @@ def _vpm_compact(variant,source,scoped):
         api_verified=(raw.get('assembly_verified')=='GRCh37' and bool(raw.get('matched_location'))
             or identity.get('accepted') is True and bool(identity.get('requested'))
                and identity.get('requested')==identity.get('returned'))
-        capture_only=(assessment=='Missing capture' or item.get('status') in {'error','capture_failed'}
+        capture_only=(assessment=='Missing capture' or item.get('status') in {'error','capture_failed','verification_required'}
                       and raw.get('failure_stage') in {'summary_capture','result_rendering'})
         if (api_verified and capture_only and source_classification(item)
                 and assessment not in {'Identity mismatch','Outdated','Ambiguous match'}):
-            return source_classification(item)+'\nBilde mangler'
+            note='\nNettleserkontroll kreves' if raw.get('capture_issue')=='browser_verification' else ''
+            return source_classification(item)+'\nBilde mangler'+note
         return result_issue(item,assessment)
     assertion='\n'.join(' '.join(line.split()) for line in source_classification(item).splitlines()).strip()
     if source=='COSMIC':
@@ -948,7 +950,7 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
         for cell in row:cell.fill=PatternFill('solid',fgColor=VPM_COLORS['pale_orange'])
     for row in (3,4):sheet.row_dimensions[row].height=24
     vpm_section(sheet,6,'Varianter og kildefunn',13)
-    for column,label in enumerate(['Gen','HGVSc','HGVSp','Kildefunn','Kommentar',*SOURCE_ORDER],1):
+    for column,label in enumerate(['Gen','HGVSc','HGVSp','Kildefunn','Rapporttekst',*SOURCE_ORDER],1):
         vpm_header(sheet.cell(7,column),label)
     widths=[14,31,25,52,32,*([22]*len(SOURCE_ORDER))]
     for row,variant in enumerate(selected,8):
@@ -956,7 +958,7 @@ def _vpm_overview(workbook,analysis,selected,scoped,names,generated):
         coding,protein,_=_vpm_identity(variant)
         values=[variant.gene,coding,protein,
                 '\n'.join(f'{source}: {label}' for source,label in zip(SOURCE_ORDER,labels) if label),
-                '',*labels]
+                report_variant_text(variant,scoped),*labels]
         for column,value in enumerate(values,1):
             cell=sheet.cell(row,column,safe_text(value));cell.border=vpm_border()
             cell.alignment=Alignment(vertical='top',wrap_text=True)
@@ -994,6 +996,10 @@ def _vpm_variant_sheet(workbook,name,variant,scoped,include_evidence,full_report
     sheet.cell(3,1).font=Font(color=VPM_COLORS['muted'],italic=True)
     sheet.cell(3,1).alignment=Alignment(wrap_text=True)
     sheet.row_dimensions[3].height=_text_height([sheet.cell(3,1).value],[145],30)
+    sheet.cell(4,1,'Rapporttekst').font=Font(bold=True,color=VPM_COLORS['navy'])
+    sheet.merge_cells('B4:L4');sheet.cell(4,2,safe_text(report_variant_text(variant,scoped)))
+    sheet.cell(4,2).alignment=Alignment(wrap_text=True,vertical='top')
+    sheet.row_dimensions[4].height=_text_height([sheet.cell(4,2).value],[125],32)
     row=5;anchors={}
     for source in SOURCE_ORDER:
         item=variant.evidence.get(source,{})

@@ -2,6 +2,61 @@
 
 Local Windows / Python 3.12. Verification runs are dated below.
 
+## HRR feedback: source searches, copy text and IGV reminder — 26 October 2026, v0.8.10
+
+Inspected the supplied ZIP and workstation log without changing their contents.
+Eight TSVs imported successfully (70 original rows). Selected distinct events
+within 100 bp were identified in five sample/gene groups: BARD1 (81 bp, two
+analyses), PIK3CA (36 bp), BRCA2 (23 bp) and ATM (2 bp). Independent analyses,
+unselected rows, duplicate interpretations of the same event, unknown loci and
+CNV/RNA/fusion rows are excluded from the warning. The orange review cell and
+details explain the IGV check; existing annotation purple remains. A pre-search
+prompt defaults to stopping and retains acknowledgement only for the unchanged
+selection in the current app session. It does not assert cis/trans or a completed
+clinical review. Compact-window and selection-change regressions passed.
+
+ClinVar's VARNAME index returned no result for BRCA2 c.5217_5223del while the
+quoted HGVS phrase returned VCV000051822.65. Its GRCh37 VCF event exactly matched
+32913708 ATTTAAGT>A. The same fallback recovered ATM c.3247del, VCV003629473.3,
+at GRCh37 108143541 TC>T. Both current aggregate assertions were Pathogenic.
+All candidates still require exact assembly, chromosome, position, REF and ALT;
+neighbouring substitutions/insertions/deletions were not accepted. A separate
+BRCA2 c.7241_7242insG lookup did not return the requested event; nearby different
+alleles remain excluded.
+
+Live NCBI webpage requests then required browser verification. Those challenges
+were not bypassed or captured as clinical evidence. The provider now reports
+verification_required, retains the independently verified API classification
+and exports Bilde mangler / Nettleserkontroll kreves. Successful live ClinVar
+website capture for these two variants is therefore not claimed.
+
+A live production COSMIC search without an identifier used BRAF:c.1799T>A,
+selected its exact syntax row and checked returned BRAF/CDS/GRCh37 event span.
+It returned COSM476 / COSV56056643 and three native source images. Candidate
+tests reject another gene, syntax, coordinate, assembly or foreign origin;
+multiple exact candidates are ambiguous. Optional deleted bases can be omitted
+only when their stated length matches the same cDNA interval. COSMIC's overview
+does not independently expose genomic REF/ALT, so this remains a source-level
+gene/CDS match requiring review, not independent genomic allele proof.
+
+The workstation's OncoKB capture diagnostics showed ready panels and expected
+source text, but stability timeouts. An exact-float stability test reproduced
+failure on subpixel geometry jitter. Capture now temporarily suppresses animation
+and scrollbar reflow, tolerates at most 0.5 CSS pixel per edge and pads the crop;
+large changes and changed identities still fail. Live OncoKB ATM insertion and
+BARD1 captures passed at emulated 125% DPI using the existing authenticated test
+profile. The exact workplace-specific reflow could not be recreated here.
+
+**200 targeted tests passed:** 171 source/report/workflow/UI tests, 23 relevant
+Archer-parity checks and six opt-in managed Edge tests (including 100/125/150%
+DPI). The full suite was not rerun. A control production workbook contains the
+new Rapporttekst in the overview and variant sheets, retained ClinVar API
+assertions with explicit image-block reasons, one OncoKB image and three COSMIC
+images. A separately verified Excel instance opened it read-only without repair.
+Its native PDF preview and source images were visually inspected. Original input
+hashes were unchanged; test profiles, patient data, logs and exports remain out
+of the source delivery. MTBP was not queried in this change.
+
 ## Expanded ClinVar source image — 22 October 2026, v0.8.9
 
 ClinVar images now include the complete germline/somatic classification summary
