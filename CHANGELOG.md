@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — 27 October 2026
+
+- Default the IGV proximity warning to 10 bp and expose a saved distance setting.
+- Display and export protein changes without outer prediction parentheses,
+  retaining original source values and Mutalyzer evidence.
+- Supply missing OPA cDNA references from the laboratory's 45 versioned NM
+  entries. Preserve explicit references and use the OPA MET/FGFR1 references
+  without an automatic MANE substitution. Genomic identity checks still apply.
+
 ## 0.8.10 — 26 October 2026
 
 - Search COSMIC by gene/cDNA when no COSM/COSV identifier is supplied. Select

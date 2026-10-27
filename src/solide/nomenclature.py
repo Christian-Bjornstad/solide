@@ -6,7 +6,7 @@ import requests
 from .public_http import public_api_session as system_trust_session
 from ._vendor.archer.services.genomic_notation import format_mtbp_grch37
 from .models import Variant
-from .quality import MANE_TARGETS
+from .quality import mane_target
 
 
 # NCBI GRCh37.p13 assembly report, primary assembled molecules only:
@@ -424,7 +424,7 @@ def _assess_normalization(v: Variant,http,result: dict,*,reference_identity=None
         if transcript:
             candidates.insert(0,dict(description=primary_name,label='Source transcript',transcript=transcript))
             suggested=primary_name
-        target=MANE_TARGETS.get(v.gene)
+        target=mane_target(v)
         if target and target[0]==transcript:
             mapped=result.get('mapping',{}).get('mapped_description')
             if not isinstance(mapped,str):
@@ -475,7 +475,7 @@ def normalize_variant(v: Variant, http=None, *, checkpoint=None,reference_identi
         data = result['normalization']
         _intronic_genomic_candidate(v, http, result)
         _intronic_context_normalization(v, http, result)
-        target = MANE_TARGETS.get(v.gene)
+        target = mane_target(v)
         if target and target[0] in v.transcript and not data.get('errors'):
             _map_normalization(http, result, target[1])
         _assess_normalization(v,http,result,reference_identity=reference_identity)
@@ -524,7 +524,7 @@ def apply_confirmed_normalization(v: Variant, result: dict) -> bool:
     if not candidate:return False
     requested_transcript=_transcript(original);target_transcript=_transcript(suggested)
     if target_transcript and target_transcript!=requested_transcript:
-        target=MANE_TARGETS.get(v.gene)
+        target=mane_target(v)
         if (not target or target!=(requested_transcript,target_transcript)
                 or candidate.get('label')!='MANE transcript'):
             return False

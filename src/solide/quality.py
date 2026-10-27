@@ -2,9 +2,14 @@ from dataclasses import dataclass
 import re
 from .models import Variant
 from .annotations import annotation_group,needs_annotation_resolution,annotation_resolution_current
+from .opa_references import uses_opa_reference
 
 MANE_TARGETS = {'FGFR1': ('NM_001174067.1', 'NM_023110.3'),
                 'MET': ('NM_001127500.3', 'NM_000245.4')}
+
+
+def mane_target(v: Variant):
+    return None if uses_opa_reference(v) else MANE_TARGETS.get(v.gene)
 
 
 @dataclass(frozen=True)
@@ -60,7 +65,7 @@ def review_reasons(v: Variant) -> list[str]:
     offsets=(n.lstrip('0') for n in re.findall(r'\d+[+-](\d+)',coding))
     if any(n and len(n)<=3 and 1<=int(n)<=100 for n in offsets):
         reasons.append('SpliceAI')
-    target = MANE_TARGETS.get(v.gene)
+    target = mane_target(v)
     if target and (target[0] in v.transcript or not v.transcript):
         reasons.append('MANE')
     if needs_annotation_resolution(v) and not annotation_resolution_current(v):

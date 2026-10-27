@@ -65,6 +65,16 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    The IGV warning distance for nearby selected variants defaults to 10 bp and
    can be adjusted here; **Save settings** retains it for the next launch.
 
+For OPA sequence variants with a `c.` change and no transcript, the app uses the
+45 exact, versioned NM references from the laboratory's **Variantformatering
+OPA.xlsx → NM-nummer** list. The source cells remain intact and the supplied
+reference is recorded in provenance. Explicit references are preserved. OPA MET
+and FGFR1 use this laboratory list without the Ion Torrent MANE substitution.
+NM identifies the transcript for a `c.` description; NC identifies the chromosome
+and its assembly version for genomic checks. Intronic descriptions can retain
+both as `NC_(NM_):c.`. Missing REF/ALT still requires review before a normalized
+name can be applied automatically.
+
 Annotation checks handle unequal or reordered lists, duplicate transcripts and
 missing names without constructing all gene/name combinations. HGVS brackets and
 fusion/CNV events stay intact. Gene/transcript columns can be repaired only when

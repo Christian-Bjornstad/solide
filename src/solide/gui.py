@@ -64,12 +64,12 @@ QListWidget#samples::item:hover { background: #F2F5EF; }
 QListWidget#samples:focus { border: 1px solid #425B3D; }
 QPushButton { background: white; border: 1px solid #CBD5C5; border-radius: 8px; padding: 10px 16px; min-height: 22px; }
 QPushButton:hover { background: #EAF0E6; border-color: #425B3D; }
-QPushButton:focus, QLineEdit:focus, QComboBox:focus, QTableView:focus { border: 2px solid #425B3D; }
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTableView:focus { border: 2px solid #425B3D; }
 QPushButton#primary { background: #425B3D; color: white; border-color: #425B3D; font-weight: 600; }
 QPushButton#primary:hover { background: #34492F; }
 QPushButton#primary:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
 QPushButton:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
-QLineEdit, QComboBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
+QLineEdit, QComboBox, QSpinBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
 QComboBox { padding-right: 36px; }
 QLineEdit { placeholder-text-color: #596454; }
 QTextEdit, QPlainTextEdit, QTableView { background: white; border: 1px solid #DEE5DA; border-radius: 8px; selection-background-color: #DCE8D5; selection-color: #1F2A22; }
@@ -833,6 +833,9 @@ class MainWindow(QMainWindow):
                *[f'{f.category}: {f.status} – {f.message}' for f in qc_flags(v)],
                f'\nClassification: {v.classification or "Pending"} · Report: {v.report_decision}',
                f'Reviewer: {v.reviewer or "—"}', '\nAssessment: '+v.comment]
+        opa_reference=v.raw.get('_opa_reference',{})
+        if isinstance(opa_reference,dict) and opa_reference.get('transcript')==transcript:
+            lines.insert(3,'OPA-referanse: '+str(opa_reference.get('source','laboratoriets NM-liste')))
         if v.id in self.variant_model.nearby:
             lines.insert(0,igv_message(v,self.variant_model.nearby[v.id]))
         for source,e in v.evidence.items():
