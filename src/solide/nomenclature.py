@@ -602,8 +602,11 @@ def confirmed_protein(v: Variant) -> str:
 def display_identity(v: Variant) -> tuple[str,str,str]:
     """Present a checked nucleotide identity without inferring a protein name."""
     if v.nomenclature_verified and v.corrected_hgvs:
-        return v.corrected_hgvs,confirmed_protein(v),_transcript(v.corrected_hgvs)
-    return v.coding,v.protein,v.transcript
+        coding,protein,transcript=v.corrected_hgvs,confirmed_protein(v),_transcript(v.corrected_hgvs)
+    else:coding,protein,transcript=v.coding,v.protein,v.transcript
+    # Laboratory reporting convention; retain the original HGVS/API evidence.
+    match=re.fullmatch(r'p\.\(([^()]+)\)',protein)
+    return coding,('p.'+match[1] if match else protein),transcript
 
 
 def _trim_spliceai_alleles(pos: int, ref: str, alt: str) -> tuple[int, str, str]:

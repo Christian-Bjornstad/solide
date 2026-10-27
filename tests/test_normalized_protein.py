@@ -29,11 +29,11 @@ def checked():
 def test_verified_mutalyzer_protein_is_used_without_replacing_imported_protein(tmp_path):
     v=checked();s=Session();a=add_analysis(s,ImportResult([v]),'00OUM00001','GRCh37','Ion Torrent','Childhood')
     v=s.variants[0];v.selected=True
-    assert display_identity(v)==(v.corrected_hgvs,'p.(Lys558_Val559delinsAsnGly)','NM_000222.3')
+    assert display_identity(v)==(v.corrected_hgvs,'p.Lys558_Val559delinsAsnGly','NM_000222.3')
     assert query_record(v,'ClinVar').hgvsp=='p.(Lys558_Val559delinsAsnGly)'
     assert v.protein=='p.[Lys558Asn;Val559Gly]'
     book=load_workbook(export_analysis(s,a.id,tmp_path).report)
-    try:assert book['Oversikt']['C8'].value=='p.(Lys558_Val559delinsAsnGly)'
+    try:assert book['Oversikt']['C8'].value=='p.Lys558_Val559delinsAsnGly'
     finally:book.close()
 
 

@@ -1,5 +1,22 @@
 from solide.models import Variant
 from solide.report_identity import report_variant_text
+import pytest
+
+
+@pytest.mark.parametrize('protein,display',[
+    ('p.(Arg1516Ter)','p.Arg1516Ter'),('p.(Lys1720AsnfsTer25)','p.Lys1720AsnfsTer25'),
+    ('p.Arg172Met','p.Arg172Met'),('p.Gly17Val','p.Gly17Val'),
+    ('p.[Arg1Gly;Gly2Val]','p.[Arg1Gly;Gly2Val]'),
+])
+def test_protein_prediction_parentheses_are_removed_only_for_presentation(protein,display):
+    from solide.nomenclature import display_identity
+    from solide.table_model import VariantTableModel
+    v=Variant(gene='TEST',transcript='NM_000001.1',coding='c.1A>T',protein=protein)
+    assert display_identity(v)[1]==display
+    model=VariantTableModel([v])
+    assert model.index(0,5).data()==display
+    assert report_variant_text(v).endswith('; '+display)
+    assert v.protein==protein
 
 
 def test_copy_line_keeps_version_gene_cdna_protein_and_cosmic_id():

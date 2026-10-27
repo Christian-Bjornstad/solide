@@ -115,6 +115,9 @@ those sources for the selected variant. Explicit single-result reruns keep their
 chosen scope; MTBP always retains its selected analysis batch.
 Original imported names remain intact. A green normalizer result alone is not
 proof that an arbitrary transcript is the right reporting reference.
+Protein predictions are displayed and reported without the outer `p.(...)`
+parentheses, following the laboratory's reporting convention. Original imported
+values and Mutalyzer responses retain their original notation.
 
 SpliceAI runs automatically for selected intronic candidates within ±100 bp.
 The search page shows the candidate count. Excel says **Ikke kjørt** when a
