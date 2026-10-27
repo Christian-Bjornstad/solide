@@ -132,7 +132,8 @@ panels must be visible and their geometry stable before and after capture;
 unrelated unfinished document resources do not block a rendered result.
 
 Before database searches, the app highlights selected, distinct sequence events
-within 100 bp in the same gene and analysis and asks for an IGV check. This is a
+within 10 bp by default in the same gene and analysis and asks for an IGV check.
+The distance is adjustable in Settings and is saved with the UI preferences. This is a
 reminder to inspect whether variants share an allele; distance alone establishes
 neither cis nor trans. The warning does not change the variants or database query.
 

@@ -11,6 +11,8 @@ from solide.gui import MainWindow
     {'accounts':{'Franklin':False}},{'login_checks':[]},
     {'login_checks':{'Franklin':[]}},
     {'login_checks':{'Franklin':{'state':42,'time':[]}}},{'text_size':float('inf')},
+    {'igv_distance_bp':True},{'igv_distance_bp':-1},{'igv_distance_bp':'100'},
+    {'igv_distance_bp':float('inf')},{'igv_distance_bp':1000001},
 ])
 def test_startup_recovers_from_wrong_setting_types(tmp_path,payload):
     settings=tmp_path/'.solide'/'ui_config.json';settings.parent.mkdir()

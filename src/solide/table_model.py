@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import QApplication, QTableView
 from .quality import review_reasons, qc_flags, kind_key,overlapping_genes
 from .nomenclature import display_identity
 from .annotations import annotation_group,annotation_resolution_current,needs_annotation_resolution
-from .proximity import nearby_variants,igv_message
+from .proximity import nearby_variants,igv_message,IGV_DISTANCE_BP
 
 COLUMNS=[('Valgt','selected'),('Patient / sample','patient'),('Gene','gene'),('Transcript','transcript'),
          ('Coding','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
@@ -58,12 +58,12 @@ class VariantProxy(QSortFilterProxyModel):
 
 class VariantTableModel(QAbstractTableModel):
     changed=pyqtSignal()
-    def __init__(self,variants=None):
-        super().__init__();self.variants=variants or [];self.nearby=nearby_variants(self.variants)
+    def __init__(self,variants=None,distance=IGV_DISTANCE_BP):
+        super().__init__();self.distance=distance;self.variants=variants or [];self.nearby=nearby_variants(self.variants,self.distance)
     def set_variants(self,variants):
-        self.beginResetModel();self.variants=variants;self.nearby=nearby_variants(variants);self.endResetModel()
+        self.beginResetModel();self.variants=variants;self.nearby=nearby_variants(variants,self.distance);self.endResetModel()
     def refresh_proximity(self):
-        self.nearby=nearby_variants(self.variants)
+        self.nearby=nearby_variants(self.variants,self.distance)
         if self.variants:self.dataChanged.emit(self.index(0,0),self.index(len(self.variants)-1,len(COLUMNS)-1))
     def rowCount(self,parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.variants)
@@ -79,7 +79,7 @@ class VariantTableModel(QAbstractTableModel):
             return Qt.CheckState.Checked if v.selected else Qt.CheckState.Unchecked
         if role in (Qt.ItemDataRole.DisplayRole,Qt.ItemDataRole.EditRole,Qt.ItemDataRole.UserRole):
             if key=='selected': return ''
-            if key=='review': return ', '.join(review_reasons(v)+(['Sjekk IGV (≤100 bp)'] if v.id in self.nearby else []))
+            if key=='review': return ', '.join(review_reasons(v)+([f'Sjekk IGV (≤{self.distance} bp)'] if v.id in self.nearby else []))
             if key=='gene' and role==Qt.ItemDataRole.DisplayRole and needs_annotation_resolution(v) and not annotation_resolution_current(v):
                 return (v.gene or 'Uavklart')+' ?'
             if key in {'coding','protein','transcript'}:

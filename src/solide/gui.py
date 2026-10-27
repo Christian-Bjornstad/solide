@@ -11,7 +11,7 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem, QDesktopServices, QFo
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QListWidget, QStackedWidget, QFileDialog, QMessageBox, QLineEdit,
-    QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
+    QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,QSpinBox,
     QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
 from . import __version__
@@ -21,7 +21,7 @@ from .import_dialog import SampleImportDialog,OumLineEdit
 from .sample_identity import normalize_oum,valid_oum
 from .importing import load_file
 from .quality import qc_flags, review_reasons
-from .proximity import nearby_variants,igv_message
+from .proximity import nearby_variants,igv_message,IGV_DISTANCE_BP
 from .session import load_session, atomic_write
 from .table_model import VariantTableModel, VariantProxy, SpreadsheetView
 from .reporting import export_analysis, STATUS
@@ -396,7 +396,7 @@ class MainWindow(QMainWindow):
         self.clear_selection_btn=self.button('Fjern valg',self.clear_selection);row.addWidget(self.clear_selection_btn)
         self.show_all_rows=QCheckBox('Show all rows');self.show_all_rows.setToolTip('Include absent calls and CNV/RNA quality rows. Original data are always retained.');self.show_all_rows.toggled.connect(self.apply_filter)
         row.addWidget(self.show_all_rows);layout.addLayout(row)
-        self.variant_model=VariantTableModel();self.variant_model.changed.connect(self.mark_dirty)
+        self.variant_model=VariantTableModel(distance=self.config.get('igv_distance_bp',IGV_DISTANCE_BP));self.variant_model.changed.connect(self.mark_dirty)
         self.proxy=VariantProxy();self.proxy.setSourceModel(self.variant_model)
         self.search.textChanged.connect(self.apply_filter);self.patient_filter.currentTextChanged.connect(self.apply_filter)
         self.variant_table=table(self.proxy,SpreadsheetView)
@@ -548,6 +548,11 @@ class MainWindow(QMainWindow):
         self.text_size.setCurrentIndex(self.text_size.findData(text_pixels(self.config.get('text_size',16))))
         self.text_size.currentIndexChanged.connect(self.apply_appearance)
         form.addRow('Text size',self.text_size)
+        self.igv_distance=QSpinBox();self.igv_distance.setRange(0,1000000);self.igv_distance.setSuffix(' bp')
+        self.igv_distance.setValue(self.config.get('igv_distance_bp',IGV_DISTANCE_BP))
+        self.igv_distance.setToolTip('Maksimal avstand mellom valgte varianter i samme gen for IGV-varsel. Standard: 10 bp.')
+        self.igv_distance.valueChanged.connect(self.update_igv_distance)
+        form.addRow('IGV: avstand mellom varianter',self.igv_distance)
         settings_actions=QWidget();settings_row=QHBoxLayout(settings_actions);settings_row.setContentsMargins(0,0,0,0)
         settings_row.addWidget(self.button('Save settings',self.save_settings));settings_row.addStretch()
         form.addRow(settings_actions)
@@ -765,8 +770,9 @@ class MainWindow(QMainWindow):
         self.next_btn.setEnabled(bool(selected) and not self.active)
         if self.nav.currentRow()==0:self.summary.setText(f'{len(self.session.analyses)} files · {len(source_row_groups(self.session.variants)):,} rows')
         else:self.summary.setText(f'{total:,} rows · {selected} selected'+(f' · {visible} shown' if visible<total else ''))
-        self.selection_summary.setText(f'{selected} varianter valgt · Oransje: sjekk IGV (≤100 bp)')
-        self.selection_summary.setToolTip('Lilla: overlappende annotasjoner. Oransje: valgte, ulike varianter i samme gen innen 100 bp – vurder cis/trans i IGV.')
+        distance=self.variant_model.distance
+        self.selection_summary.setText(f'{selected} varianter valgt · Oransje: sjekk IGV (≤{distance} bp)')
+        self.selection_summary.setToolTip(f'Lilla: overlappende annotasjoner. Oransje: valgte, ulike varianter i samme gen innen {distance} bp – vurder cis/trans i IGV.')
 
     def apply_filter(self,*args):
         self.proxy.candidates_only=not self.show_all_rows.isChecked()
@@ -1080,10 +1086,17 @@ class MainWindow(QMainWindow):
         self.session=session;self.session_path=Path(path);self.dirty=False;self.active_analysis_id=None
         self.refresh();self.record_activity('Session opened');self.banner.setText('Session opened')
 
+    def update_igv_distance(self,value):
+        self.variant_model.distance=value
+        self.variant_model.refresh_proximity()
+        self.igv_acknowledged.clear()
+        self.refresh_counts()
+
     def save_settings(self):
         self.config.pop('output_dir',None)
         self.config.update(background=self.background.isChecked(),
                      text_size=self.text_size.currentData(),
+                     igv_distance_bp=self.igv_distance.value(),
                      sources=[s for s,c in self.source_checks.items() if c.isChecked()])
         try:atomic_write(self.config_path,json.dumps(self.config,ensure_ascii=False,indent=2));self.banner.setText('Settings saved')
         except Exception as exc:self.notify_error(str(exc))
@@ -1105,7 +1118,7 @@ class MainWindow(QMainWindow):
             self.banner.setText('Velg minst én database.');return
         plan=build_search_plan(scope,sources,mode,chosen)
         if not plan:self.banner.setText('No searches to run');self.record_activity(f'{mode}: no searches to run');return
-        neighbours=nearby_variants(scope.variants)
+        neighbours=nearby_variants(scope.variants,self.variant_model.distance)
         signature=tuple(sorted((v.id,v.gene,v.locus,v.ref,v.alt,tuple(sorted(other.id for other,_ in neighbours[v.id])))
             for v in scope.variants if v.id in neighbours))
         if signature and signature not in self.igv_acknowledged:
@@ -1115,7 +1128,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
             if choice!=QMessageBox.StandardButton.Yes:return
             self.igv_acknowledged.add(signature)
-            self.record_activity('IGV-varsel bekreftet for nærliggende valgte varianter (≤100 bp).')
+            self.record_activity(f'IGV-varsel bekreftet for nærliggende valgte varianter (≤{self.variant_model.distance} bp).')
         root=self.work_root()
         if root is None:return
         if not sources:self.notify_error('Select at least one source.');return

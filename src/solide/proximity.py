@@ -2,7 +2,7 @@
 from collections import defaultdict
 from ._vendor.archer.services.genomic_notation import normalize_vcf_change
 
-IGV_DISTANCE_BP=100
+IGV_DISTANCE_BP=10
 
 
 def nearby_variants(variants,distance=IGV_DISTANCE_BP):

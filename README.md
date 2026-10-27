@@ -62,6 +62,8 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    retries and **Export Excel**. MTBP tissue defaults to Other. Match states and
    source assertions stay distinct from laboratory classifications.
 4. **Settings** contains appearance, browser behaviour and database accounts.
+   The IGV warning distance for nearby selected variants defaults to 10 bp and
+   can be adjusted here; **Save settings** retains it for the next launch.
 
 Annotation checks handle unequal or reordered lists, duplicate transcripts and
 missing names without constructing all gene/name combinations. HGVS brackets and
