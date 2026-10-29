@@ -9,7 +9,7 @@ def report_variant_text(v,session=None):
     reference=transcript
     if ':' in coding:
         prefix,coding=coding.rsplit(':',1)
-        if not reference and re.fullmatch(r'(?:NM|NR|NC|NG)_\d+\.\d+',prefix):reference=prefix
+        if re.fullmatch(r'(?:NM|NR|NC|NG)_\d+\.\d+(?:\((?:NM|NR)_\d+\.\d+\))?',prefix):reference=prefix
     identity=f'{reference}({v.gene})' if reference else v.gene
     text=f'{identity}: {coding}' if coding else identity
     if protein not in ('','p.?','p.(?)','?'):text+='; '+protein

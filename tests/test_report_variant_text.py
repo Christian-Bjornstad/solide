@@ -34,6 +34,18 @@ def test_genomic_only_identity_does_not_invent_a_transcript_or_protein():
     assert report_variant_text(v)=='NC_000011.9(ATM): g.100A>T'
 
 
+@pytest.mark.parametrize('description,expected',[
+    ('NC_000011.9:g.100A>T','NC_000011.9(ATM): g.100A>T'),
+    ('NC_000011.9(NM_000051.4):c.100+1A>T',
+        'NC_000011.9(NM_000051.4)(ATM): c.100+1A>T'),
+    ('NM_000051.4:c.100A>T','NM_000051.4(ATM): c.100A>T'),
+])
+def test_corrected_reference_is_preserved_in_copy_line(description,expected):
+    v=Variant(gene='ATM',transcript='NM_000051.3',coding='c.1A>T',protein='p.Arg1Ter',
+        corrected_hgvs=description,nomenclature_verified=True)
+    assert report_variant_text(v)==expected
+
+
 def test_excel_contains_copy_line_in_overview_and_variant_sheet(tmp_path):
     from contextlib import closing
     from openpyxl import load_workbook
@@ -44,3 +56,22 @@ def test_excel_contains_copy_line_in_overview_and_variant_sheet(tmp_path):
     with closing(load_workbook(export_analysis(session,'analysis-a',tmp_path).report)) as book:
         assert book['Oversikt']['E7'].value=='Rapporttekst'
         assert book['Oversikt']['E8'].value==book['KRAS']['B4'].value=='NM_033360.4(KRAS): c.35G>A; p.Gly12Asp (COSM521)'
+
+
+def test_excel_copy_line_keeps_confirmed_context_and_protein(tmp_path):
+    from contextlib import closing
+    from openpyxl import load_workbook
+    from test_normalized_protein import checked
+    from test_vpm_analysis_reports import make_session
+    from solide.reporting import export_analysis
+    v=checked()
+    v.corrected_hgvs='NC_000004.11(NM_000222.3):c.1674_1676delinsTGG'
+    item=v.evidence['Mutalyzer'];item['fingerprint']=v.fingerprint('Other')
+    item['raw']['nomenclature_assessment']['suggested_hgvs']=v.corrected_hgvs
+    data=item['raw']['normalization'];data['normalized_description']=v.corrected_hgvs
+    data['protein']['description']='NC_000004.11(NP_000213.1):p.(Lys558_Val559delinsAsnGly)'
+    session,_=make_session(v)
+    expected='NC_000004.11(NM_000222.3)(KIT): c.1674_1676delinsTGG; p.Lys558_Val559delinsAsnGly'
+    with closing(load_workbook(export_analysis(session,'analysis-a',tmp_path).report)) as book:
+        assert book['Oversikt']['E8'].value==book['KIT']['B4'].value==expected
+    assert v.protein=='p.[Lys558Asn;Val559Gly]'

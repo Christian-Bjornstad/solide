@@ -577,11 +577,12 @@ def normalization_unchanged(v: Variant, result: dict) -> bool:
 def confirmed_protein(v: Variant) -> str:
     """Use only a current, same-event normalizer prediction on this transcript."""
     if not v.nomenclature_verified or not v.corrected_hgvs:return ''
+    from .annotations import annotation_resolution_current
+    proof=v.raw.get('_annotation_resolution',{}) if annotation_resolution_current(v) else {}
     item=v.evidence.get('Mutalyzer',{})
-    raw=item.get('raw',{}) if item.get('fingerprint')==v.fingerprint(item.get('tissue','Other')) else {}
-    if not raw:
-        from .annotations import annotation_resolution_current
-        if annotation_resolution_current(v):raw=v.raw['_annotation_resolution'].get('normalization',{})
+    raw=item.get('raw',{}) if (item.get('status')=='verified'
+        and item.get('fingerprint')==v.fingerprint(item.get('tissue','Other'))) else {}
+    if not raw:raw=proof.get('normalization',{})
     assessment=raw.get('nomenclature_assessment',{})
     data=raw.get('contextual_normalization',{}).get('normalization') or raw.get('normalization',{})
     if (assessment.get('identity_confirmed') is not True or assessment.get('status') not in {'Normalized','Unchanged'}
@@ -594,8 +595,23 @@ def confirmed_protein(v: Variant) -> str:
     transcript=_transcript(v.corrected_hgvs)
     name=data.get('protein',{}).get('description','')
     if not isinstance(name,str) or not transcript:return ''
-    match=re.fullmatch(r'(?:NC_\d+\.\d+\()?'+re.escape(transcript)
-        +r'\(NP_\d+\.\d+\)\)?:('r'p\.[A-Za-z0-9_*?()=;\[\].]+)',name)
+    protein_selector=r'\(NP_\d+\.\d+\)'
+    known_proteins=set()
+    for identity in (raw.get('reference_identity',{}),proof.get('reference',{})):
+        if (isinstance(identity,dict) and identity.get('transcript')==transcript
+                and re.fullmatch(r'NP_\d+\.\d+',str(identity.get('protein','')))):
+            known_proteins.add(identity['protein'])
+    if len(known_proteins)>1:return ''
+    if known_proteins:protein_selector=r'\('+re.escape(known_proteins.pop())+r'\)'
+    references=[re.escape(transcript)+protein_selector]
+    context=re.fullmatch(r'(NC_\d+\.\d+)\('+re.escape(transcript)+r'\)',v.corrected_hgvs.split(':',1)[0])
+    if context:
+        # Genomic-context normalization returns NC(NP), with the exact NM
+        # already established by normalized_description above. Keep NC versions.
+        reference=re.escape(context[1])
+        references.extend([reference+protein_selector,
+            reference+r'\('+re.escape(transcript)+protein_selector+r'\)'])
+    match=re.fullmatch(r'(?:'+'|'.join(references)+r'):('r'p\.[A-Za-z0-9_*?()=;\[\].]+)',name)
     return match[1] if match else ''
 
 
