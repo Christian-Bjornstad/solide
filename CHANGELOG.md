@@ -1,7 +1,14 @@
 # Changelog
 
-## Unreleased — 27 October 2026
+## 0.8.11 — 29 October 2026
 
+- Add manual sequence variants, either blank or derived from highlighted source
+  rows. Resolve the exact transcript, gene and GRCh37 event before source queries;
+  keep original entries, parent row IDs and derived-allele provenance in the report.
+- Add a select-all checkbox to Valgt, scoped to visible rows of the active analysis.
+- Read confirmed genomic-context Mutalyzer protein predictions and retain the full
+  NC(NM) reference in LVMS/report text. Reject unverified or mismatched protein data.
+- Document the missing run/barcode/sample crosswalk in the supplied coverage files.
 - Default the IGV proximity warning to 10 bp and expose a saved distance setting.
 - Display and export protein changes without outer prediction parentheses,
   retaining original source values and Mutalyzer evidence.

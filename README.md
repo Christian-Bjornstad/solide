@@ -54,6 +54,16 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    Mutalyzer screenshot source is unchecked. Unconfirmed choices remain marked
    for review and cannot be queried or exported as findings. Low-coverage cells retain their red warning.
    Original rows occur once in Excel raw data, with each annotation linked by provenance.
+   The checkbox beside **Valgt** selects all visible rows in the active analysis;
+   clicking again clears them. A partial check means some visible rows are selected.
+   **Ny variant… → Tom variant…** opens a manual entry form. **Fra markert rad…**
+   starts an interpretation of highlighted source rows, including a combined
+   variant after IGV review. Enter a versioned transcript and nucleotide change;
+   protein, gene and locus are optional. Original rows and their choices remain
+   intact; uncheck the old calls when reporting the new interpretation instead.
+   Manual entries obtain their gene and GRCh37 alleles from exact public-reference
+   checks before any database search, also when Mutalyzer screenshots are unchecked.
+   Their original input and source-row links remain in the hidden report provenance.
    **Variant details** opens optional
    identity review and assessments. The normal view omits
    unselected absent Genexus calls and CNV/RNA quality rows; **Show all rows**
@@ -114,6 +124,10 @@ prose, screenshots and imported cells retain their source language.
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
 [Norwegian report-cell messages](docs/RAPPORTSVAR.md) distinguish failed access,
 unconfirmed identity, missing captures and completed no-hit searches.
+[LVMS/report notation](docs/LVMS_REPORTING.md) describes checked corrections and
+protein formatting. Existing exports must be regenerated to use the current code.
+[Coverage investigation](docs/COVERAGE_LINKING.md) records why the supplied run
+matrices cannot be linked automatically to individual sample TSVs.
 
 **Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
 required. A new name is applied automatically only after an independent check
