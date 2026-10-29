@@ -71,6 +71,9 @@ def _protein(result,reference):
 
 def resolve_annotation(variant,resolver,*,normalize=None,checkpoint=lambda:None):
     """Commit a unique checked mapping; incomplete or conflicting data stay visible."""
+    if variant.raw.get('_manual_variant'):
+        from .manual_resolution import resolve_manual_variant
+        return resolve_manual_variant(variant,resolver,checkpoint=checkpoint)
     if annotation_resolution_current(variant):return True
     checkpoint()
     if normalize is None:

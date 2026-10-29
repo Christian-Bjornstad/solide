@@ -9,7 +9,7 @@ MANE_TARGETS = {'FGFR1': ('NM_001174067.1', 'NM_023110.3'),
 
 
 def mane_target(v: Variant):
-    return None if uses_opa_reference(v) else MANE_TARGETS.get(v.gene)
+    return None if uses_opa_reference(v) or v.raw.get('_manual_variant') else MANE_TARGETS.get(v.gene)
 
 
 @dataclass(frozen=True)

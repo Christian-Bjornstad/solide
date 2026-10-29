@@ -125,7 +125,7 @@ def require_resolved_annotations(variant: Variant) -> None:
 
 
 def needs_annotation_resolution(variant: Variant) -> bool:
-    return bool(annotation_group(variant) or variant.raw.get('_annotation_issue'))
+    return bool(annotation_group(variant) or variant.raw.get('_annotation_issue') or variant.raw.get('_manual_variant'))
 
 
 def annotation_fingerprint(variant: Variant) -> str:
@@ -134,6 +134,7 @@ def annotation_fingerprint(variant: Variant) -> str:
             annotation_group(variant),variant.raw.get('_annotation_column_repair'),
             variant.raw.get('_columns'),variant.raw.get('_values'),variant.nomenclature_verified,
             variant.raw.get('_annotation_issue')]
+    if '_manual_variant' in variant.raw:source.append(variant.raw['_manual_variant'])
     return hashlib.sha256(json.dumps([variant.fingerprint(''),source],ensure_ascii=False,default=str).encode()).hexdigest()
 
 

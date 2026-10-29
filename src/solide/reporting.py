@@ -649,6 +649,15 @@ def _source_rows(workbook,variants,scoped,attachment_name,anchors,directory,anal
         sheet.row_dimensions[storage].hidden=True
     for variant in variants:
         group=annotation_group(variant)
+        manual=variant.raw.get('_manual_variant')
+        if manual:
+            original_row(sheet,[None]*7+[variant.id,'manual','Manuell variant'])
+            storage=sheet.max_row
+            mapping={'inputs':manual,'gene_choice':variant.gene,'transcript_choice':variant.transcript,
+                     'coding_choice':variant.coding,'protein_choice':variant.protein,'selected':variant.selected,
+                     'resolution':variant.raw.get('_annotation_resolution',{})}
+            _literal_chunks(sheet,storage,11,json.dumps(mapping,ensure_ascii=False))
+            sheet.row_dimensions[storage].hidden=True
         if not group:continue
         original_row(sheet,[None]*7+[variant.id,'annotation','Annotasjonsvalg'])
         storage=sheet.max_row
