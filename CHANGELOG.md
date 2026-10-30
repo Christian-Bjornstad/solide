@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Replace the S icon with a magnifying glass over a cell cluster on moss green,
+  with regenerated PNG and multiresolution Windows ICO assets.
+
 ## 0.8.11 — 29 October 2026
 
 - Add manual sequence variants, either blank or derived from highlighted source

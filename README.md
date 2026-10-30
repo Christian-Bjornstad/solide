@@ -95,7 +95,7 @@ alleles or unavailable reference services require review/retry. Automatic splitt
 is bounded to 64 transcript choices and 64 names per source row. The current
 database workflows use confirmed GRCh37/hg19 coordinates.
 
-The app icon source is `src/solide/assets/solide.svg`. Edit it and run
+The app icon source is `src/solide/assets/solide-source.png`. Replace it and run
 `python scripts/build_icon.py` to regenerate the PNG and Windows ICO.
 
 To repeat the synthetic stress run, use
