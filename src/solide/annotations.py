@@ -117,11 +117,15 @@ def annotation_group(variant: Variant) -> dict:
 def require_resolved_annotations(variant: Variant) -> None:
     if needs_annotation_resolution(variant) and not annotation_resolution_current(variant):
         reason=variant.raw.get('_annotation_resolution',{}).get('reason') or variant.raw.get('_annotation_issue')
-        raise ValueError(reason or 'Annotasjoner må kontrolleres mot gen, transkript og genomisk endring før søk.')
+        identity=' · '.join(filter(None,[variant.gene,variant.transcript,
+            f'kilderad {variant.source_row}' if variant.source_row else '']))
+        raise ValueError(f'Annotasjon må avklares: {identity or "valgt variant"}.\n'
+            +(reason or 'Gen, transkript og genomisk endring er ikke bekreftet.')
+            +'\nKjør søket på nytt, eller fjern valget for denne raden i Varianter.')
 
 
 def needs_annotation_resolution(variant: Variant) -> bool:
-    return bool(annotation_group(variant) or variant.raw.get('_annotation_issue'))
+    return bool(annotation_group(variant) or variant.raw.get('_annotation_issue') or variant.raw.get('_manual_variant'))
 
 
 def annotation_fingerprint(variant: Variant) -> str:
@@ -130,6 +134,7 @@ def annotation_fingerprint(variant: Variant) -> str:
             annotation_group(variant),variant.raw.get('_annotation_column_repair'),
             variant.raw.get('_columns'),variant.raw.get('_values'),variant.nomenclature_verified,
             variant.raw.get('_annotation_issue')]
+    if '_manual_variant' in variant.raw:source.append(variant.raw['_manual_variant'])
     return hashlib.sha256(json.dumps([variant.fingerprint(''),source],ensure_ascii=False,default=str).encode()).hexdigest()
 
 

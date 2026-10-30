@@ -1,5 +1,144 @@
 # Changelog
 
+## Unreleased
+
+- Replace the S icon with a magnifying glass over a cell cluster on moss green,
+  with regenerated PNG and multiresolution Windows ICO assets.
+
+## 0.8.11 — 29 October 2026
+
+- Add manual sequence variants, either blank or derived from highlighted source
+  rows. Resolve the exact transcript, gene and GRCh37 event before source queries;
+  keep original entries, parent row IDs and derived-allele provenance in the report.
+- Add a select-all checkbox to Valgt, scoped to visible rows of the active analysis.
+- Read confirmed genomic-context Mutalyzer protein predictions and retain the full
+  NC(NM) reference in LVMS/report text. Reject unverified or mismatched protein data.
+- Document the missing run/barcode/sample crosswalk in the supplied coverage files.
+- Default the IGV proximity warning to 10 bp and expose a saved distance setting.
+- Display and export protein changes without outer prediction parentheses,
+  retaining original source values and Mutalyzer evidence.
+- Supply missing OPA cDNA references from the laboratory's 45 versioned NM
+  entries. Preserve explicit references and use the OPA MET/FGFR1 references
+  without an automatic MANE substitution. Genomic identity checks still apply.
+
+## 0.8.10 — 26 October 2026
+
+- Search COSMIC by gene/cDNA when no COSM/COSV identifier is supplied. Select
+  only one exact native syntax result and check its gene, CDS and GRCh37 span;
+  ambiguous, mismatching and unfinished searches remain explicit outcomes.
+- Add a quoted HGVS ClinVar query for aliases missing from the VARNAME index.
+  Every candidate still requires the exact GRCh37 position and both alleles.
+- Stabilize source capture against animation/scrollbar reflow and subpixel DPI
+  jitter, with a padded crop and layout checks before and after the screenshot.
+- Show copyable Rapporttekst in the overview and every variant sheet, using
+  the reviewed identity and available matching COSMIC identifier.
+- Mark selected, distinct same-gene events within 100 bp in orange and show an
+  IGV reminder before database searches. This is a phasing prompt, not a cis/trans
+  conclusion; overlapping annotations retain their existing purple colour.
+- Distinguish ClinVar browser verification from no-hit/layout failures and retain
+  independently verified API classifications when the website image is blocked.
+
+## 0.8.9 — 22 October 2026
+
+- Extend the ClinVar source image to include its expanded Variant Details panel
+  with identifiers, location, timeline and HGVS table alongside the complete
+  germline/somatic summary. Open collapsed details using the native control.
+- Label the Excel image Klassifikasjon og variantdetaljer and retain the detail
+  text and captured panel metadata without changing source classifications.
+
+## 0.8.8 — 22 October 2026
+
+- Capture rendered OncoKB and ClinVar result panels without waiting for unrelated
+  document resources or fonts. Required source labels and stable panel geometry
+  are still checked before and after capture.
+- Retain the matched OncoKB answer when only its screenshot fails, keep that
+  search eligible for retry, and record layout diagnostics. Discard the image
+  and old classification if the returned variant changes during capture.
+- Shorten the missing COSMIC identifier message to `COSMIC-ID mangler` in the
+  provider response and Excel cells.
+
+## 0.8.7 — 22 October 2026
+
+- Accept OncoKB's canonical splice/protein labels when its returned genomic
+  breadcrumb independently matches the requested GRCh37 event and gene. Keep
+  mismatching genes, alleles, assemblies and URL-only claims rejected.
+- Read ClinVar's variant-level aggregate classifications rather than the first
+  condition/submission assertion. Keep germline, somatic clinical impact and
+  oncogenicity separate in the report cell when several are available.
+- Replace vague report checks with specific Norwegian access, network, profile,
+  identity and capture messages. Retain independently verified classifications
+  when only capture failed. Document all report texts in docs/RAPPORTSVAR.md.
+- Treat COSMIC's exact-ID empty-search response as no hit instead of a rendering
+  timeout. Keep unrelated fuzzy results excluded.
+- Capture the complete OncoKB overview/effect panels and ClinVar summary after
+  fonts and layout settle; retry crops if page geometry moves during capture.
+
+## 0.8.6 — 21 October 2026
+
+- Capture only explicitly annotated MANE Select transcript scores, together with
+  Pangolin scores and Predicted Splicing Consequences in one native source image.
+  Keep the query/settings image and full API evidence; scoring settings are unchanged.
+- Verify Pangolin's allele/settings and every visible MANE score row. Missing
+  sections, failed consequence predictions and canonical fallbacks require retry.
+  Older SpliceAI-only images are eligible for Retry failed.
+
+## 0.8.5 — 21 October 2026
+
+- Show all database checkboxes directly in Searches, with Select all/Clear all
+  controls and an explicit run-selected-databases button. Keep the search page
+  scrollable on smaller windows so controls do not overlap or disappear.
+- Shorten the Excel creation label to Opprettet, retaining Norwegian local time
+  and the existing date format.
+
+## 0.8.4 — 21 October 2026
+
+- Match Archer Prosess's 60-second wait after MTBP credential submission.
+- Follow a newly committed main document during SSO redirects instead of waiting
+  for the first document's loader forever. Continue rejecting the previous
+  document, another frame and browser error pages.
+
+## 0.8.3 — 21 October 2026
+
+- Give MTBP navigation and post-submission authentication the full configured
+  timeout instead of stopping after 15 seconds. Wait for the visible trusted
+  login form or a positively authenticated application before proceeding.
+- Recover a navigation timeout when the redirected MTBP document is already
+  usable. Retry a failed login-page GET once without replaying credentials.
+- Return a concise Norwegian connection failure without marking login verified;
+  release the dedicated Edge profile and keep form waits cancellable.
+
+## 0.8.2 — 20 October 2026
+
+- Use independently verified genomic names for complex OPA variants without
+  transcripts. Submit chromosome-qualified genomic queries to MTBP and allele
+  queries to Franklin rather than gene-qualified genomic positions.
+- Match MTBP's assembly-labelled VCF popup against the complete source event,
+  trimming shared padding and checking chromosome, position and both alleles.
+  Reject conflicting assemblies/DNA even if the protein matches; recheck older
+  no-hit results that contained gene rows.
+- Distinguish a completed COSMIC search with zero exact legacy matches from a
+  rendering timeout. Unrelated fuzzy search results never establish a match.
+- Include short update instructions for running from a fresh extracted folder
+  without reinstalling dependencies on an existing working installation.
+- Verify filtered RefSeq/assembly mappings in exact genomic transcript context
+  when reference sequences differ elsewhere (ATRX, ATM and KRAS inputs).
+- Validate promoter positions outside the mRNA sequence against the explicit
+  GRCh37 source allele and exact transcript, retaining the original rejection.
+- Complete verified genomic-only OPA normalizations without repeatedly marking
+  them for review. Extend public API recovery to BRCA Exchange.
+- Recover public Mutalyzer and SpliceAI API reads through managed Edge when
+  Python cannot connect or a proxy rejects access. Reuse one isolated temporary
+  connection per search run and retain the same response/identity checks.
+- Resolve exact human transcript identity through Mutalyzer's RefSeq model when
+  NCBI is unreachable. Reject reference-version, gene, organism and CDS conflicts.
+- Identify the annotation and original row blocking Excel or the combined MTBP
+  batch. Include the actual failure cause in activity logs and allow Retry failed
+  to recover the whole batch after a temporary annotation outage.
+- Mark independently checked unchanged Mutalyzer names as complete without
+  taking an unused screenshot. Show a verified normalized protein prediction
+  with corrected DNA names while retaining original imported protein text.
+- Show the application version in the window and startup log.
+
 ## Unreleased — 19 October 2026
 
 - Recover from cancelled/failed login without leaving Edge profiles or active

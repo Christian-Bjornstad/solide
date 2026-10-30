@@ -11,17 +11,22 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem, QDesktopServices, QFo
 from PyQt6.QtSvg import QSvgRenderer
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QPushButton, QListWidget, QStackedWidget, QFileDialog, QMessageBox, QLineEdit,
-    QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,
+    QComboBox, QTableView, QHeaderView, QTextEdit, QCheckBox, QFormLayout, QSplitter,QSpinBox,
     QDialog, QDialogButtonBox, QGroupBox, QAbstractItemView, QProgressBar,QTabWidget,QPlainTextEdit,QListWidgetItem,QScrollArea,QLayout,QFrame,QGridLayout,QMenu)
 from .models import Session, Variant
+from . import __version__
 from .analyses import add_analysis,ensure_analyses,analysis_scoped_session,rename_analysis_sample
 from .annotations import source_row_groups,annotation_resolution_current
 from .import_dialog import SampleImportDialog,OumLineEdit
 from .sample_identity import normalize_oum,valid_oum
 from .importing import load_file
 from .quality import qc_flags, review_reasons
+from .proximity import nearby_variants,igv_message,IGV_DISTANCE_BP
 from .session import load_session, atomic_write
 from .table_model import VariantTableModel, VariantProxy, SpreadsheetView
+from .selection_header import SelectionHeader
+from .manual_variant_dialog import ManualVariantDialog
+from .manual_variants import add_manual_variant
 from .reporting import export_analysis, STATUS
 from .evidence import SOURCES, QueueControl, run_queue, evidence_is_current
 from .evidence import build_search_plan, assess_evidence, source_applies
@@ -62,12 +67,12 @@ QListWidget#samples::item:hover { background: #F2F5EF; }
 QListWidget#samples:focus { border: 1px solid #425B3D; }
 QPushButton { background: white; border: 1px solid #CBD5C5; border-radius: 8px; padding: 10px 16px; min-height: 22px; }
 QPushButton:hover { background: #EAF0E6; border-color: #425B3D; }
-QPushButton:focus, QLineEdit:focus, QComboBox:focus, QTableView:focus { border: 2px solid #425B3D; }
+QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTableView:focus { border: 2px solid #425B3D; }
 QPushButton#primary { background: #425B3D; color: white; border-color: #425B3D; font-weight: 600; }
 QPushButton#primary:hover { background: #34492F; }
 QPushButton#primary:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
 QPushButton:disabled { background: #E8ECE5; color: #667260; border-color: #D6DED2; }
-QLineEdit, QComboBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
+QLineEdit, QComboBox, QSpinBox { background: white; color: #243128; border: 1px solid #CBD5C5; padding: 8px 10px; border-radius: 8px; min-height: 24px; }
 QComboBox { padding-right: 36px; }
 QLineEdit { placeholder-text-color: #596454; }
 QTextEdit, QPlainTextEdit, QTableView { background: white; border: 1px solid #DEE5DA; border-radius: 8px; selection-background-color: #DCE8D5; selection-color: #1F2A22; }
@@ -77,8 +82,10 @@ QHeaderView::section { background: #EDF2E9; padding: 10px; border: 0; border-bot
 QGroupBox { background: white; border: 1px solid #DEE5DA; border-radius: 10px; margin-top: 12px; padding: 20px; }
 QGroupBox::title { subcontrol-origin: margin; left: 18px; padding: 0 6px; font-weight: 600; }
 QGroupBox#settingsCard { margin-top: 0; padding: 12px; }
+QGroupBox#databaseChoices { margin-top: 8px; padding: 6px; }
 QScrollArea { border: 0; background: transparent; }
 QWidget#settingsContent { background: #F5F7F4; }
+QWidget#searchContent { background: #F5F7F4; }
 QScrollBar:vertical { background: #F5F7F4; width: 12px; margin: 0; border: 0; }
 QScrollBar::handle:vertical { background: #CBD5C5; border: 3px solid #F5F7F4; border-radius: 6px; min-height: 36px; }
 QScrollBar::handle:vertical:hover { background: #9BAE92; }
@@ -182,7 +189,7 @@ class MainWindow(QMainWindow):
         self.session=Session();self.session_path=None;self.dirty=False;self.active_analysis_id=None
         self.active=None;self.workers=[];self.control=None;self.current_variant=None
         self.run_plan=set();self.run_done=set();self.run_id=None;self.run_started=0;self.run_state='Idle'
-        self.run_history_saved=set()
+        self.run_history_saved=set();self.igv_acknowledged=set()
         self.temporary_workspace=tempfile.TemporaryDirectory(prefix='solide-')
         try:self.activity=ActivityLog(Path(self.temporary_workspace.name)/'activity.log')
         except OSError:self.activity=None
@@ -190,7 +197,7 @@ class MainWindow(QMainWindow):
         self.config_path=Path.home()/'.solide'/'ui_config.json'
         self.config=read_ui_settings(self.config_path)
         self.login_verified=set();self.close_after_login=False
-        self.setWindowTitle('Solide | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
+        self.setWindowTitle(f'Solide {__version__} | Variant review');self.setWindowIcon(QIcon(str(ASSETS/'solide.ico')));self.resize(1440,940)
         self.setMinimumSize(1050,700);self.setPalette(light_palette());self.setStyleSheet(STYLE)
         central=QWidget();self.setCentralWidget(central)
         horizontal=QHBoxLayout(central);horizontal.setContentsMargins(0,0,0,0);horizontal.setSpacing(0)
@@ -243,7 +250,7 @@ class MainWindow(QMainWindow):
         self.nav.currentRowChanged.connect(self.navigate);self.nav.setCurrentRow(0)
         self.apply_appearance()
         self.refresh()
-        self.record_activity('Application started')
+        self.record_activity(f'Application started · Solide {__version__}')
 
     def consolidate_workspace(self):
         original=[self.pages.widget(i) for i in range(self.pages.count())]
@@ -251,6 +258,7 @@ class MainWindow(QMainWindow):
         workspace=QWidget();layout=QVBoxLayout(workspace);layout.setContentsMargins(0,18,0,0)
         row=QHBoxLayout()
         row.addWidget(self.button('Import files',lambda:self.nav.setCurrentRow(0)))
+        row.addWidget(self.add_variant_btn)
         row.addStretch();self.next_btn=self.button('Search selected →',lambda:self.nav.setCurrentRow(2));row.addWidget(self.next_btn)
         self.workspace_view=QComboBox();self.workspace_view.addItems(['Variants','Quality'])
         self.workspace_view.setAccessibleName('Workspace view');row.addWidget(self.workspace_view);layout.addLayout(row)
@@ -259,7 +267,7 @@ class MainWindow(QMainWindow):
         self.workspace_view.currentIndexChanged.connect(self.workspace_pages.setCurrentIndex)
         self.empty_state=QWidget();layout.addWidget(self.empty_state,1)
         layout.addWidget(self.workspace_pages,1);self.pages.addWidget(original[0]);self.pages.addWidget(workspace)
-        searches=original[3];search_layout=searches.layout()
+        searches=original[3];searches.setObjectName('searchContent');search_layout=searches.layout()
         export_row=QHBoxLayout();export_row.addWidget(self.report_btn);export_row.addWidget(self.include_evidence)
         export_row.addStretch();self.exports_toggle=self.button('Exported files',lambda:None)
         self.exports_toggle.setCheckable(True);export_row.addWidget(self.exports_toggle)
@@ -269,7 +277,12 @@ class MainWindow(QMainWindow):
         self.report_log.hide();self.exports_toggle.toggled.connect(self.report_log.setVisible)
         self.report_analysis_label.setParent(searches);self.report_analysis_label.hide()
         original[4].deleteLater()
-        self.pages.addWidget(searches);self.pages.addWidget(original[5])
+        search_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        self.search_scroll=QScrollArea();self.search_scroll.setWidgetResizable(True)
+        self.search_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.search_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.search_scroll.setWidget(searches)
+        self.pages.addWidget(self.search_scroll);self.pages.addWidget(original[5])
         # Import history is recorded in the common log; retain the widget for the
         # existing import summary handler, without another navigation destination.
         self.import_log.hide()
@@ -387,15 +400,24 @@ class MainWindow(QMainWindow):
         self.clear_selection_btn=self.button('Fjern valg',self.clear_selection);row.addWidget(self.clear_selection_btn)
         self.show_all_rows=QCheckBox('Show all rows');self.show_all_rows.setToolTip('Include absent calls and CNV/RNA quality rows. Original data are always retained.');self.show_all_rows.toggled.connect(self.apply_filter)
         row.addWidget(self.show_all_rows);layout.addLayout(row)
-        self.variant_model=VariantTableModel();self.variant_model.changed.connect(self.mark_dirty)
+        self.variant_model=VariantTableModel(distance=self.config.get('igv_distance_bp',IGV_DISTANCE_BP));self.variant_model.changed.connect(self.mark_dirty)
         self.proxy=VariantProxy();self.proxy.setSourceModel(self.variant_model)
         self.search.textChanged.connect(self.apply_filter);self.patient_filter.currentTextChanged.connect(self.apply_filter)
         self.variant_table=table(self.proxy,SpreadsheetView)
+        self.selection_header=SelectionHeader(self.variant_table)
+        self.variant_table.setHorizontalHeader(self.selection_header)
+        self.selection_header.checkbox.clicked.connect(self.select_visible)
         self.variant_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
         self.variant_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.variant_table.setToolTip('Select cells and press Ctrl+C to copy to Excel. Tick rows to include them in searches and reports.')
         self.variant_table.setShowGrid(True);self.variant_table.verticalHeader().show()
         self.variant_table.setWordWrap(False)
+        self.add_variant_btn=QPushButton('Ny variant…')
+        manual_menu=QMenu(self.add_variant_btn)
+        manual_menu.addAction('Tom variant…',lambda:self.add_manual_row())
+        self.derive_variant_btn=manual_menu.addAction('Fra markert rad…',lambda:self.add_manual_row(from_selected=True))
+        self.add_variant_btn.setMenu(manual_menu)
+        self.add_variant_btn.setToolTip('Legg til en variant, eller lag én tolkning fra markerte kilderader.')
         self.variant_table.selectionModel().currentRowChanged.connect(self.show_variant)
         split=QSplitter(Qt.Orientation.Vertical);split.addWidget(self.variant_table);self.variant_table.setMinimumHeight(180)
         detail=QWidget();d=QHBoxLayout(detail);d.setContentsMargins(0,0,0,0)
@@ -445,19 +467,11 @@ class MainWindow(QMainWindow):
         self.selection_summary=QLabel();self.selection_summary.hide()
 
     def build_evidence(self):
-        layout=self.page()
-        options_row=QHBoxLayout();self.sources_toggle=self.button('Sources / tissue…',lambda:None)
-        self.sources_toggle.setCheckable(True);options_row.addWidget(self.sources_toggle)
-        self.sources_summary=QLabel();self.sources_summary.setWordWrap(True);options_row.addWidget(self.sources_summary,1)
-        layout.addLayout(options_row)
-        self.source_options=QWidget();options=QVBoxLayout(self.source_options);options.setContentsMargins(0,0,0,0)
-        self.source_options.hide();self.sources_toggle.toggled.connect(self.source_options.setVisible)
-        layout.addWidget(self.source_options);top=QHBoxLayout()
-        self.tissue_patient=QComboBox();self.tissue_patient.currentTextChanged.connect(self.show_tissue)
-        self.tissue=QComboBox();self.tissue.setEditable(True);self.tissue.addItems(['Other','Lung','Breast','Colorectal'])
-        self.tissue_patient.hide()
-        top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
-        top.addWidget(self.button('Save tissue',self.save_tissue));options.addLayout(top)
+        layout=self.page();layout.setSpacing(8)
+        self.source_options=QGroupBox('Databaser');options=QVBoxLayout(self.source_options)
+        self.source_options.setObjectName('databaseChoices')
+        options.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        layout.addWidget(self.source_options)
         self.source_checks={};sources=QGridLayout()
         for index,source in enumerate(SOURCES):
             check=QCheckBox(source);check.setChecked(source in self.config.get('sources',['ClinVar','MTBP','Franklin','Mutalyzer','SpliceAI']))
@@ -465,9 +479,21 @@ class MainWindow(QMainWindow):
             if source=='BRCA Exchange':check.setToolTip('Runs only for BRCA1 and BRCA2. Exact hg19 alleles or versioned HGVS are checked.')
             sources.addWidget(check,index//4,index%4);self.source_checks[source]=check
         options.addLayout(sources)
+        choices=QHBoxLayout()
+        self.select_all_sources_btn=self.button('Velg alle',lambda:self.select_sources(True))
+        self.clear_sources_btn=self.button('Fjern alle',lambda:self.select_sources(False))
+        choices.addWidget(self.select_all_sources_btn);choices.addWidget(self.clear_sources_btn)
+        self.sources_summary=QLabel();self.sources_summary.setWordWrap(True);choices.addWidget(self.sources_summary,1)
+        options.addLayout(choices)
+        top=QHBoxLayout()
+        self.tissue_patient=QComboBox();self.tissue_patient.currentTextChanged.connect(self.show_tissue)
+        self.tissue=QComboBox();self.tissue.setEditable(True);self.tissue.addItems(['Other','Lung','Breast','Colorectal'])
+        self.tissue_patient.hide()
+        top.addWidget(QLabel('MTBP tissue'));top.addWidget(self.tissue,1)
+        top.addWidget(self.button('Save tissue',self.save_tissue));options.addLayout(top)
         self.tissue.currentTextChanged.connect(self.update_sources_summary)
         row=QHBoxLayout();self.run_btn=self.button('Run searches',self.start_queue,True);row.addWidget(self.run_btn)
-        self.run_btn.setText('Search databases')
+        self.run_btn.setText('Søk i valgte databaser')
         self.run_btn.setToolTip('Run new, incomplete or outdated searches. Completed matches and no-match results are preserved.')
         self.pause_btn=self.button('Pause',self.pause_queue);self.pause_btn.setEnabled(False);row.addWidget(self.pause_btn)
         self.stop_btn=self.button('Stop',self.stop_queue);self.stop_btn.setEnabled(False);row.addWidget(self.stop_btn)
@@ -492,6 +518,10 @@ class MainWindow(QMainWindow):
         self.evidence_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.evidence_table.doubleClicked.connect(lambda index:self.inspect_evidence());layout.addWidget(self.evidence_table,2)
         for check in self.source_checks.values():check.toggled.connect(self.refresh_evidence);check.toggled.connect(self.update_sources_summary)
+
+    def select_sources(self,checked):
+        if self.active:return
+        for check in self.source_checks.values():check.setChecked(checked)
 
     def update_sources_summary(self,*args):
         selected=[source for source,check in self.source_checks.items() if check.isChecked()]
@@ -531,6 +561,11 @@ class MainWindow(QMainWindow):
         self.text_size.setCurrentIndex(self.text_size.findData(text_pixels(self.config.get('text_size',16))))
         self.text_size.currentIndexChanged.connect(self.apply_appearance)
         form.addRow('Text size',self.text_size)
+        self.igv_distance=QSpinBox();self.igv_distance.setRange(0,1000000);self.igv_distance.setSuffix(' bp')
+        self.igv_distance.setValue(self.config.get('igv_distance_bp',IGV_DISTANCE_BP))
+        self.igv_distance.setToolTip('Maksimal avstand mellom valgte varianter i samme gen for IGV-varsel. Standard: 10 bp.')
+        self.igv_distance.valueChanged.connect(self.update_igv_distance)
+        form.addRow('IGV: avstand mellom varianter',self.igv_distance)
         settings_actions=QWidget();settings_row=QHBoxLayout(settings_actions);settings_row.setContentsMargins(0,0,0,0)
         settings_row.addWidget(self.button('Save settings',self.save_settings));settings_row.addStretch()
         form.addRow(settings_actions)
@@ -601,6 +636,7 @@ class MainWindow(QMainWindow):
         for widget in (self.import_btn,self.clear_btn,self.run_btn,self.login_btn,self.report_btn,
                        self.assessment_btn,self.variant_table,self.gene_edit,self.transcript_edit,self.hgvs_edit,self.genomic_edit,
                        self.verified_check,self.background,self.tissue,self.select_rows_btn,self.clear_selection_btn,
+                       self.add_variant_btn,self.derive_variant_btn,
                        self.retry_btn,self.rerun_btn,self.rerun_all_btn,self.rerun_menu_btn,self.account_save_btn,self.account_clear_btn,
                        self.account_username,self.account_password,self.login_source,
                        self.analysis_selector,self.analysis_edit_btn,self.include_evidence,self.sample_list,self.next_btn,self.show_all_rows,self.source_options):
@@ -609,6 +645,7 @@ class MainWindow(QMainWindow):
         self.use_normalization_btn.setEnabled(not value and self.normalization_choices.count()>0)
         self.next_btn.setEnabled(not value and any(v.selected for v in self.active_session().variants))
         self.login_cancel_btn.setEnabled(value and isinstance(self.active,LoginWorker))
+        self.refresh_counts()
 
     def launch(self,worker):
         self.active=worker;self.workers.append(worker);self.busy(True)
@@ -748,7 +785,18 @@ class MainWindow(QMainWindow):
         self.next_btn.setEnabled(bool(selected) and not self.active)
         if self.nav.currentRow()==0:self.summary.setText(f'{len(self.session.analyses)} files · {len(source_row_groups(self.session.variants)):,} rows')
         else:self.summary.setText(f'{total:,} rows · {selected} selected'+(f' · {visible} shown' if visible<total else ''))
-        self.selection_summary.setText(f'{selected} varianter valgt')
+        distance=self.variant_model.distance
+        self.selection_summary.setText(f'{selected} varianter valgt · Oransje: sjekk IGV (≤{distance} bp)')
+        self.selection_summary.setToolTip(f'Lilla: overlappende annotasjoner. Oransje: valgte, ulike varianter i samme gen innen {distance} bp – vurder cis/trans i IGV.')
+        visible_rows=[self.variant_model.variants[self.proxy.mapToSource(self.proxy.index(row,0)).row()]
+                      for row in range(self.proxy.rowCount())]
+        count=sum(v.selected for v in visible_rows)
+        check=self.selection_header.checkbox
+        check.setCheckState(Qt.CheckState.Checked if visible_rows and count==len(visible_rows) else
+                            Qt.CheckState.PartiallyChecked if count else Qt.CheckState.Unchecked)
+        check.setEnabled(bool(visible_rows) and not self.active)
+        self.add_variant_btn.setEnabled(bool(self.active_analysis_id) and not self.active)
+        self.derive_variant_btn.setEnabled(bool(visible_rows) and not self.active)
 
     def apply_filter(self,*args):
         self.proxy.candidates_only=not self.show_all_rows.isChecked()
@@ -760,12 +808,41 @@ class MainWindow(QMainWindow):
 
     def select_visible(self,value):
         if self.active:return
-        for row in range(self.proxy.rowCount()):
-            index=self.proxy.mapToSource(self.proxy.index(row,0))
-            self.variant_model.variants[index.row()].selected=value
+        rows=[self.proxy.mapToSource(self.proxy.index(row,0)).row() for row in range(self.proxy.rowCount())]
+        for row in rows:self.variant_model.variants[row].selected=bool(value)
         if self.variant_model.variants:
             self.variant_model.dataChanged.emit(self.variant_model.index(0,0),self.variant_model.index(len(self.variant_model.variants)-1,0))
         self.mark_dirty()
+
+    def add_manual_row(self,from_selected=False):
+        if self.active or not self.active_analysis_id:return
+        indexes=self.variant_table.selectionModel().selectedIndexes() if from_selected else []
+        rows=sorted({self.proxy.mapToSource(index).row() for index in indexes})
+        if from_selected and not rows:
+            self.banner.setText('Marker én eller flere kilderader først.');return
+        parents=[self.variant_model.variants[row] for row in rows]
+        initial={}
+        if len(parents)==1:
+            coding,protein,transcript=display_identity(parents[0])
+            initial={'gene':parents[0].gene if ',' not in parents[0].gene else '',
+                     'transcript':transcript if ',' not in transcript else '',
+                     'coding':coding.split(':')[-1] if ',' not in coding else '',
+                     'protein':protein if ',' not in protein else ''}
+        elif parents:
+            for field in ('gene','transcript'):
+                values={getattr(parent,field) for parent in parents}
+                if len(values)==1 and ',' not in next(iter(values)):initial[field]=values.pop()
+        dialog=ManualVariantDialog(self,initial=initial,from_selected=from_selected)
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        try:
+            variant=add_manual_variant(self.session,self.active_analysis_id,**dialog.values(),
+                                       parent_ids=[parent.id for parent in parents])
+        except ValueError as exc:self.notify_error(str(exc));return
+        self.search.clear();self.mark_dirty();self.refresh()
+        row=next(index for index,item in enumerate(self.variant_model.variants) if item.id==variant.id)
+        index=self.proxy.mapFromSource(self.variant_model.index(row,2))
+        self.variant_table.setCurrentIndex(index);self.variant_table.scrollTo(index)
+        self.banner.setText('Manuell variant lagt til. Gen, transkript og genomisk endring kontrolleres ved søk.')
 
     def select_highlighted(self):
         if self.active:return
@@ -784,6 +861,7 @@ class MainWindow(QMainWindow):
         self.mark_dirty()
 
     def mark_dirty(self):
+        self.variant_model.refresh_proximity()
         self.dirty=True;self.refresh_counts();self.refresh_evidence();self.update_sources_summary()
 
     def show_variant(self,index,*args):
@@ -808,6 +886,11 @@ class MainWindow(QMainWindow):
                *[f'{f.category}: {f.status} – {f.message}' for f in qc_flags(v)],
                f'\nClassification: {v.classification or "Pending"} · Report: {v.report_decision}',
                f'Reviewer: {v.reviewer or "—"}', '\nAssessment: '+v.comment]
+        opa_reference=v.raw.get('_opa_reference',{})
+        if isinstance(opa_reference,dict) and opa_reference.get('transcript')==transcript:
+            lines.insert(3,'OPA-referanse: '+str(opa_reference.get('source','laboratoriets NM-liste')))
+        if v.id in self.variant_model.nearby:
+            lines.insert(0,igv_message(v,self.variant_model.nearby[v.id]))
         for source,e in v.evidence.items():
             state=STATUS.get(e.get('status'),e.get('status','Unknown')) if evidence_is_current(v,e,self.session.tissue_for(v),self.session) else 'Outdated'
             lines.append(f'\n{source}: {state}\n{e.get("summary", "")}')
@@ -824,7 +907,9 @@ class MainWindow(QMainWindow):
             self.normalization_status.setText('Outdated — rerun Mutalyzer for the current identity.');return
         assessment=evidence.get('raw',{}).get('nomenclature_assessment',{})
         applied=evidence.get('raw',{}).get('nomenclature_application',{}).get('applied') is True
+        unchanged=assessment.get('status')=='Unchanged' and assessment.get('identity_confirmed') is True
         self.normalization_status.setText('Normalisert · brukes i søk og rapport' if applied else
+            'Navnet er kontrollert · uendret' if unchanged else
             assessment.get('status','Review required')+' · '+assessment.get('reason',evidence.get('summary','')))
         if not assessment.get('identity_confirmed') or assessment.get('status')=='Conflict':return
         candidates=assessment.get('candidates',[])
@@ -1057,10 +1142,17 @@ class MainWindow(QMainWindow):
         self.session=session;self.session_path=Path(path);self.dirty=False;self.active_analysis_id=None
         self.refresh();self.record_activity('Session opened');self.banner.setText('Session opened')
 
+    def update_igv_distance(self,value):
+        self.variant_model.distance=value
+        self.variant_model.refresh_proximity()
+        self.igv_acknowledged.clear()
+        self.refresh_counts()
+
     def save_settings(self):
         self.config.pop('output_dir',None)
         self.config.update(background=self.background.isChecked(),
                      text_size=self.text_size.currentData(),
+                     igv_distance_bp=self.igv_distance.value(),
                      sources=[s for s,c in self.source_checks.items() if c.isChecked()])
         try:atomic_write(self.config_path,json.dumps(self.config,ensure_ascii=False,indent=2));self.banner.setText('Settings saved')
         except Exception as exc:self.notify_error(str(exc))
@@ -1079,9 +1171,20 @@ class MainWindow(QMainWindow):
             self.banner.setText('Ingen varianter valgt. Kryss av i Valgt-kolonnen.');return
         sources=sorted({source for id,source in chosen}) if mode=='chosen' else [s for s,c in self.source_checks.items() if c.isChecked()]
         if not sources:
-            self.banner.setText('Velg minst én kilde.');return
+            self.banner.setText('Velg minst én database.');return
         plan=build_search_plan(scope,sources,mode,chosen)
         if not plan:self.banner.setText('No searches to run');self.record_activity(f'{mode}: no searches to run');return
+        neighbours=nearby_variants(scope.variants,self.variant_model.distance)
+        signature=tuple(sorted((v.id,v.gene,v.locus,v.ref,v.alt,tuple(sorted(other.id for other,_ in neighbours[v.id])))
+            for v in scope.variants if v.id in neighbours))
+        if signature and signature not in self.igv_acknowledged:
+            lines=[igv_message(v,neighbours[v.id]) for v in scope.variants if v.id in neighbours]
+            choice=QMessageBox.question(self,'Sjekk IGV før databasesøk',
+                '\n\n'.join(lines)+'\n\nFortsette med databasesøket?',
+                QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,QMessageBox.StandardButton.No)
+            if choice!=QMessageBox.StandardButton.Yes:return
+            self.igv_acknowledged.add(signature)
+            self.record_activity(f'IGV-varsel bekreftet for nærliggende valgte varianter (≤{self.variant_model.distance} bp).')
         root=self.work_root()
         if root is None:return
         if not sources:self.notify_error('Select at least one source.');return
@@ -1148,12 +1251,13 @@ class MainWindow(QMainWindow):
                 or payload.get('input_fingerprint')!=v.fingerprint('')):return
         source_fields=('patient','source_file','source_hash','source_row','assembly')
         if any(getattr(incoming,key)!=getattr(v,key) for key in source_fields):return
-        raw_fields=('_columns','_values','_sheet','_source_row_id','_annotation_group')
+        raw_fields=('_columns','_values','_sheet','_source_row_id','_annotation_group','_manual_variant')
         if any(incoming.raw.get(key)!=v.raw.get(key) for key in raw_fields):return
         proof=incoming.raw.get('_annotation_resolution')
         if not isinstance(proof,dict) or proof.get('status') not in {'verified','unresolved'}:return
         candidate=copy.deepcopy(v)
         fields=('gene','transcript','coding','protein','corrected_hgvs','controlled_genomic','nomenclature_verified')
+        if v.raw.get('_manual_variant'):fields+=('locus','ref','alt')
         if proof.get('status')=='unresolved' and any(getattr(incoming,field)!=getattr(v,field) for field in fields):return
         for field in fields:setattr(candidate,field,copy.deepcopy(getattr(incoming,field)))
         candidate.raw['_annotation_resolution']=copy.deepcopy(proof)
@@ -1195,7 +1299,12 @@ class MainWindow(QMainWindow):
         if 'provisional_status' not in e.get('raw',{}):
             self.run_done.add(key);self.progress.setValue(len(self.run_done))
             assessment=assess_evidence(v,e,self.session)
-            self.record_activity(f'{source} · {v.gene}: {assessment.label}')
+            detail=''
+            if assessment.retryable or e.get('status') in {'needs_review','error','network_error'}:
+                detail=' | '+str(e.get('summary') or assessment.reason).replace('\n',' ')[:800]
+                failure=e.get('raw',{}).get('failure') or v.raw.get('_annotation_resolution',{}).get('failure')
+                if failure:detail+=' | '+str(failure.get('type',''))
+            self.record_activity(f'{source} · {v.gene}: {assessment.label}'+detail)
         if source=='Mutalyzer' and self.current_variant is v:
             row=next((i for i,item in enumerate(self.variant_model.variants) if item is v),None)
             if row is not None:self.show_variant(self.proxy.mapFromSource(self.variant_model.index(row,0)))

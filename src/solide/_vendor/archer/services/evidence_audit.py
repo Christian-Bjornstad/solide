@@ -16,7 +16,7 @@ from solide._vendor.archer.services.capture_validation import validate_capture
 
 
 AUDIT_SCHEMA_VERSION = 2
-MTBP_MATCHING_REVISION = 2
+MTBP_MATCHING_REVISION = 3
 RETRYABLE_EVIDENCE_STATUSES = frozenset(
     {
         "error",
@@ -120,6 +120,8 @@ class EvidenceAuditIndex:
 
 
 def is_completed_evidence(evidence: DatabaseEvidence) -> bool:
+    if evidence.status == 'found' and evidence.raw.get('capture_issue'):
+        return False
     analysis_id = str(evidence.raw.get("analysis_id") or "")
     if (
         evidence.database == "MTBP"

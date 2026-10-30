@@ -24,6 +24,49 @@ def finish(app, window):
     assert window.active is None
 
 
+def test_real_login_worker_clears_failed_mtbp_state_and_can_retry(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from solide._vendor.archer.services.browser_review import BrowserReviewService
+    from solide._vendor.archer.services.edge_cdp import EdgeCdpError, EdgeCdpTimeout
+    failing = [True]; closed = []; saved = []; errors = []
+    class Page:
+        url = 'about:blank'
+        def goto(self, *args, **kwargs):
+            if failing[0]:
+                raise EdgeCdpTimeout('Microsoft Edge timed out during Page.navigate.')
+            self.url = 'https://mtbp.org/analyse/'
+        def evaluate(self, *args, **kwargs):return {'mtbpInput': not failing[0]}
+        def wait_for_timeout(self, *args):pass
+        def bring_to_front(self):pass
+    @contextmanager
+    def browser():yield object()
+    def service(**kwargs):
+        kwargs['profile_root'] = tmp_path/'profiles'
+        instance = BrowserReviewService(navigation_timeout_ms=250, **kwargs)
+        instance._browser_api = lambda: (browser, EdgeCdpError, EdgeCdpTimeout)
+        instance._launch_browser_context = lambda *a, **k: SimpleNamespace(
+            pages=[Page()], close=lambda: closed.append(True))
+        return instance
+    monkeypatch.setattr(gui, 'BrowserReviewService', service)
+    monkeypatch.setattr(gui, 'write_password', lambda *args: saved.append(args))
+    app, window = window_for_test(monkeypatch, tmp_path)
+    window.notify_error = lambda message: errors.append(message)
+    try:
+        window.login_source.setCurrentText('MTBP')
+        window.account_username.setText('synthetic@example.org')
+        window.account_password.setText('never-submitted')
+        window.login(); finish(app, window)
+        assert 'forbindelse' in window.banner.text().lower()
+        assert 'Logger inn' not in window.account_status.text()
+        assert window.login_btn.isEnabled() and not window.account_password.text()
+        assert 'MTBP' not in window.login_verified and not saved and not errors
+        failing[0] = False
+        window.login(); finish(app, window)
+        assert 'MTBP' in window.login_verified and len(closed) == 2
+    finally:window.close()
+
+
 def test_password_saved_only_after_verified_credential_login(monkeypatch, tmp_path):
     saved = []
     monkeypatch.setattr(gui, 'write_password', lambda *a: saved.append(a))

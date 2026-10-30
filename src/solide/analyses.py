@@ -7,6 +7,7 @@ import hashlib
 from .models import Analysis, ImportResult, Session
 from .annotations import split_annotations
 from .sample_identity import normalize_oum,valid_oum
+from .opa_references import apply_opa_reference
 
 PROFILES = ('OPA', 'Ion Torrent', 'Unassigned')
 ASSEMBLIES = ('GRCh37', 'GRCh38', 'Unknown')
@@ -105,6 +106,7 @@ def add_analysis(session: Session, result: ImportResult, patient: str, assembly:
         variant.analysis_id = analysis.id
         variant.patient = patient
         variant.assembly = assembly
+        if profile=='OPA':apply_opa_reference(variant)
     session.analyses.append(analysis)
     session.variants.extend(child for variant in variants for child in split_annotations(variant))
     validate_analyses(session)

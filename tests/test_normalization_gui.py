@@ -17,7 +17,7 @@ def test_verified_normalization_suggestion_populates_review_without_approval(tmp
     window.session=Session(variants=[v]);window.session_path=tmp_path/'review.solide.json'
     try:
         window.refresh();window.variant_table.selectRow(0);app.processEvents()
-        assert 'Unchanged' in window.normalization_status.text()
+        assert 'uendret' in window.normalization_status.text()
         assert window.use_normalization_btn.isEnabled()
         window.use_normalization()
         assert window.hgvs_edit.text()==suggested

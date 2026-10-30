@@ -74,4 +74,5 @@ def test_original_unchanged_name_is_not_automatically_approved(monkeypatch,tmp_p
     monkeypatch.setattr(module,'capture_mutalyzer',lambda *args,**kwargs:capture_result(tmp_path))
     rerun(module,session,tmp_path)
     assert not v.nomenclature_verified and not v.corrected_hgvs
-    assert v.evidence['Mutalyzer']['status']=='needs_review'
+    assert v.evidence['Mutalyzer']['status']=='verified'
+    assert module.assess_evidence(v,v.evidence['Mutalyzer'],session).label=='Verified match'

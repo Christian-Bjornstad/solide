@@ -180,6 +180,8 @@ def test_spliceai_match_requires_complete_hg19_response(tmp_path):
     evidence['raw']['screenshots']=[{'path':str(capture),'label':'Synthetic query settings'},
                                   {'path':str(capture),'label':'Synthetic score table'}]
     evidence['raw']['capture']={'query':response['variant'],'score_identity_confirmed':True,'dom_identity_confirmed':True,
+        'capture_version':2,'mane_transcripts':['ENST1.2'],
+        'panels':{key:{'visible':True,'transcripts':['ENST1.2']} for key in ('spliceai','pangolin','consequences')},
         'settings':{'hg':37,'distance':500,'mask':1,'bc':'basic','ref_alt':True}}
     assert assess_evidence(v,evidence,session).label=='Verified match'
     response['hg']=38

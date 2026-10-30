@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 import requests
 
 from ._vendor.archer.services.system_trust import system_trust_session
+from .public_http import public_api_session
 
 _EFETCH = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi'
 _TRANSCRIPT = re.compile(r'(?:NM|NR)_\d{6,9}\.[1-9]\d{0,3}')
@@ -90,6 +91,37 @@ def _parse_identity(accession: str, content: bytes) -> dict:
     }
 
 
+def _parse_mutalyzer_identity(accession, payload):
+    """Accept only the exact human reference and its unique gene/CDS hierarchy."""
+    root = payload.get('annotations') if isinstance(payload, dict) else None
+    if not isinstance(root, dict) or root.get('id') != accession or root.get('type') != 'record':
+        return _unresolved(accession, 'reference_mismatch')
+    taxonomy = root.get('qualifiers', {}).get('dbxref', [])
+    if isinstance(taxonomy, str):taxonomy = [taxonomy]
+    if (not isinstance(taxonomy, list) or {value for value in taxonomy
+            if isinstance(value,str) and value.startswith('taxon:')} != {'taxon:9606'}):
+        return _unresolved(accession, 'nonhuman_reference')
+    genes = [item for item in root.get('features', []) if isinstance(item, dict) and item.get('type') == 'gene']
+    if len(genes) != 1:
+        return _unresolved(accession, 'conflicting_gene')
+    gene = genes[0]; name = gene.get('id', '')
+    if not isinstance(name, str) or not _GENE.fullmatch(name) or gene.get('qualifiers', {}).get('name', name) != name:
+        return _unresolved(accession, 'invalid_gene')
+    transcripts = [item for item in gene.get('features', []) if isinstance(item, dict)
+                   and item.get('id') == accession and item.get('type') in {'mRNA', 'ncRNA'}]
+    if len(transcripts) != 1:
+        return _unresolved(accession, 'reference_mismatch')
+    cds = [item for item in transcripts[0].get('features', []) if isinstance(item, dict) and item.get('type') == 'CDS']
+    if accession.startswith('NM_'):
+        if len(cds) != 1 or not isinstance(cds[0].get('id'), str) or not _PROTEIN.fullmatch(cds[0]['id']):
+            return _unresolved(accession, 'missing_cds_gene')
+    elif cds:
+        return _unresolved(accession, 'noncoding_cds_conflict')
+    return {'transcript': accession, 'gene': name, 'protein': cds[0]['id'] if cds else '', 'gene_id': '',
+            'status': 'resolved', 'source': 'Mutalyzer RefSeq',
+            'reference_url': 'https://mutalyzer.nl/api/reference_model/?reference_id=' + accession}
+
+
 class TranscriptIdentityResolver:
     """Reusable, bounded per-run lookup with no requests until ``resolve``.
 
@@ -101,7 +133,7 @@ class TranscriptIdentityResolver:
     identities remain usable. No background retry or cooldown sleep is made.
     """
 
-    def __init__(self, http=None, *, timeout=15, cache_size=256, checkpoint=None,
+    def __init__(self, http=None, *, fallback_http=None, timeout=15, cache_size=256, checkpoint=None,
                  request_interval=0.34):
         if not isinstance(cache_size, int) or isinstance(cache_size, bool) or not 1 <= cache_size <= 4096:
             raise ValueError('cache_size must be between 1 and 4096.')
@@ -112,6 +144,10 @@ class TranscriptIdentityResolver:
             raise ValueError('request_interval must be between zero and 60 seconds.')
         self._http = http
         self._owns_http = http is None
+        self._fallback_http = fallback_http
+        self._owns_fallback = fallback_http is None
+        self._fallback_enabled = http is None or fallback_http is not None
+        self._ncbi_unavailable = False
         self._timeout = timeout
         self._cache_size = cache_size
         self._cache: OrderedDict[str, dict] = OrderedDict()
@@ -131,22 +167,47 @@ class TranscriptIdentityResolver:
     def close(self) -> None:
         if not self._closed and self._owns_http and self._http is not None:
             self._http.close()
+        if not self._closed and self._owns_fallback and self._fallback_http is not None:
+            self._fallback_http.close()
         self._cache.clear()
         self._cooldown_until = 0.0
         self._cooldown_reason = ''
         self._closed = True
 
     def _fetch(self, accession: str) -> tuple[dict, bool]:
+        if not self._ncbi_unavailable:
+            value, unavailable = self._fetch_ncbi(accession)
+            if not (self._fallback_enabled and unavailable and value['reason'] in {'network_error', 'timeout', 'http_error'}):
+                return value, unavailable
+            self._ncbi_unavailable = True
+        if self._checkpoint is not None:self._checkpoint()
+        if self._fallback_http is None:self._fallback_http = public_api_session()
+        try:
+            response = self._fallback_http.get('https://mutalyzer.nl/api/reference_model/',
+                params={'reference_id': accession}, timeout=self._timeout)
+            response.raise_for_status()
+            if len(response.content) > _MAX_XML_BYTES:
+                return _unresolved(accession, 'oversized_response'), False
+            value = _parse_mutalyzer_identity(accession, response.json())
+            return value, False
+        except requests.Timeout:
+            return _unresolved(accession, 'timeout'), True
+        except requests.RequestException:
+            return _unresolved(accession, 'network_error'), True
+        except (ValueError, TypeError, AttributeError):
+            return _unresolved(accession, 'invalid_xml'), True
+
+    def _fetch_ncbi(self, accession: str) -> tuple[dict, bool]:
         if self._last_request is not None:
             remaining = self._request_interval - (time.monotonic() - self._last_request)
             if remaining > 0:
                 time.sleep(remaining)
         if self._checkpoint is not None:
             self._checkpoint()
-        if self._http is None:
-            self._http = system_trust_session()
         self._last_request = time.monotonic()
         try:
+            if self._http is None:
+                self._http = system_trust_session()
             response = self._http.get(_EFETCH, params={
                 'db': 'nuccore', 'id': accession, 'rettype': 'gb', 'retmode': 'xml', 'tool': 'solide',
             }, timeout=self._timeout, allow_redirects=False)
@@ -161,7 +222,7 @@ class TranscriptIdentityResolver:
             return _parse_identity(accession, response.content), False
         except requests.Timeout:
             return _unresolved(accession, 'timeout'), True
-        except requests.RequestException:
+        except (requests.RequestException, OSError):
             return _unresolved(accession, 'network_error'), True
 
     def resolve(self, accessions) -> dict[str, dict]:

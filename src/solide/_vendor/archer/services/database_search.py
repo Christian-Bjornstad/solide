@@ -394,16 +394,24 @@ class DatabaseSearchService:
             if accession and version:
                 accession = f"{accession}.{version}"
         title = title or root.findtext(".//Title") or root.findtext(".//Name/ElementValue") or query
-        significance = (
-            root.findtext(".//ClinicalSignificance/Description")
-            or root.findtext(".//GermlineClassification/Description")
-            or ""
-        )
-        review_status = (
-            root.findtext(".//ClinicalSignificance/ReviewStatus")
-            or root.findtext(".//GermlineClassification/ReviewStatus")
-            or ""
-        )
+        # VCV contains RCV condition aggregates and individual submissions before
+        # its variant-level aggregate. An unrestricted descendant lookup can
+        # select an old Pathogenic assertion instead of the current conflict.
+        aggregate = archive.find('ClassifiedRecord/Classifications') if archive is not None else None
+        classification_tags = {'germline': 'GermlineClassification',
+            'somatic_clinical_impact': 'SomaticClinicalImpact', 'oncogenicity': 'OncogenicityClassification'}
+        classifications = {key: aggregate.findtext(tag+'/Description').strip()
+            for key,tag in classification_tags.items()
+            if aggregate is not None and aggregate.findtext(tag+'/Description','').strip()}
+        significance = next((classifications[key] for key in ('germline','oncogenicity','somatic_clinical_impact')
+                             if key in classifications), '')
+        review_status = next((aggregate.findtext(classification_tags[key]+'/ReviewStatus','')
+            for key in ('germline','oncogenicity','somatic_clinical_impact') if key in classifications), '')
+        if archive is None:
+            # Older RCV XML: read only its explicit reference assertion.
+            significance = root.findtext('.//ReferenceClinVarAssertion/ClinicalSignificance/Description','')
+            review_status = root.findtext('.//ReferenceClinVarAssertion/ClinicalSignificance/ReviewStatus','')
+            if significance:classifications['germline']=significance
         accession_node = root.find(".//*[@Accession]")
         if not accession and accession_node is not None:
             accession = accession_node.attrib.get("Accession", "")
@@ -423,7 +431,8 @@ class DatabaseSearchService:
             accession=accession or clinvar_id,
             clinical_significance=significance,
             url=f"https://www.ncbi.nlm.nih.gov/clinvar/variation/{clinvar_id}/",
-            raw={"query": query, "clinvar_id": clinvar_id, "xml_preview": text[:1000]},
+            raw={"query": query, "clinvar_id": clinvar_id, "xml_preview": text[:1000],
+                 "classifications": classifications, "classification_scope": "variant_aggregate"},
         )
 
     @staticmethod
@@ -472,6 +481,10 @@ class DatabaseSearchService:
                            f"{identity.alternate}(GRCh37)")
         if variant.hgvsc:
             queries.append(f"{variant.hgvsc}[VARNAME]")
+            # HGVS aliases (notably indels) can be absent from the VARNAME
+            # index while present as an exact phrase. Candidates still require
+            # independent GRCh37 position AND REF/ALT confirmation.
+            queries.append('"'+variant.hgvsc+'"')
         queries.extend(
             identifier
             for identifier in re.findall(

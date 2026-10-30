@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QApplication, QTableView
 from .quality import review_reasons, qc_flags, kind_key,overlapping_genes
 from .nomenclature import display_identity
 from .annotations import annotation_group,annotation_resolution_current,needs_annotation_resolution
+from .proximity import nearby_variants,igv_message,IGV_DISTANCE_BP
 
 COLUMNS=[('Valgt','selected'),('Patient / sample','patient'),('Gene','gene'),('Transcript','transcript'),
          ('Coding','coding'),('Protein','protein'),('AF (%)','af_percent'),('Coverage','coverage'),
@@ -57,10 +58,13 @@ class VariantProxy(QSortFilterProxyModel):
 
 class VariantTableModel(QAbstractTableModel):
     changed=pyqtSignal()
-    def __init__(self,variants=None):
-        super().__init__();self.variants=variants or []
+    def __init__(self,variants=None,distance=IGV_DISTANCE_BP):
+        super().__init__();self.distance=distance;self.variants=variants or [];self.nearby=nearby_variants(self.variants,self.distance)
     def set_variants(self,variants):
-        self.beginResetModel();self.variants=variants;self.endResetModel()
+        self.beginResetModel();self.variants=variants;self.nearby=nearby_variants(variants,self.distance);self.endResetModel()
+    def refresh_proximity(self):
+        self.nearby=nearby_variants(self.variants,self.distance)
+        if self.variants:self.dataChanged.emit(self.index(0,0),self.index(len(self.variants)-1,len(COLUMNS)-1))
     def rowCount(self,parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.variants)
     def columnCount(self,parent=QModelIndex()):
@@ -75,7 +79,7 @@ class VariantTableModel(QAbstractTableModel):
             return Qt.CheckState.Checked if v.selected else Qt.CheckState.Unchecked
         if role in (Qt.ItemDataRole.DisplayRole,Qt.ItemDataRole.EditRole,Qt.ItemDataRole.UserRole):
             if key=='selected': return ''
-            if key=='review': return ', '.join(review_reasons(v))
+            if key=='review': return ', '.join(review_reasons(v)+([f'Sjekk IGV (≤{self.distance} bp)'] if v.id in self.nearby else []))
             if key=='gene' and role==Qt.ItemDataRole.DisplayRole and needs_annotation_resolution(v) and not annotation_resolution_current(v):
                 return (v.gene or 'Uavklart')+' ?'
             if key in {'coding','protein','transcript'}:
@@ -85,9 +89,11 @@ class VariantTableModel(QAbstractTableModel):
             if role==Qt.ItemDataRole.DisplayRole and isinstance(value,float): return f'{value:g}'
             return value if value is not None else ''
         if role==Qt.ItemDataRole.BackgroundRole:
+            if key=='review' and v.id in self.nearby:return QColor('#FFE1AD')
             if overlapping_genes(v) and not (key=='coverage' and any(f.status=='Failed' for f in qc_flags(v))):
                 return QColor('#EADCF5')
             if any(f.status=='Failed' for f in qc_flags(v)):return QColor('#FCE5E3')
+            if v.id in self.nearby:return QColor('#FFE1AD')
             if review_reasons(v) and not v.nomenclature_verified:return QColor('#FFF2D5')
         if role==Qt.ItemDataRole.ToolTipRole:
             group=annotation_group(v)
@@ -98,7 +104,8 @@ class VariantTableModel(QAbstractTableModel):
                 overlap+=('Kobling bekreftet.\n' if annotation_resolution_current(v) else 'Kobling kontrolleres ved søk.\n')
             if v.raw.get('_annotation_issue'):overlap+=v.raw['_annotation_issue']+'\n'
             original=f'Opprinnelig: {v.transcript}:{v.coding} {v.protein}\n' if v.corrected_hgvs else ''
-            return overlap+original+f'{v.platform} · source row {v.source_row}\nAssembly: {v.assembly}\n{v.source_file}'
+            nearby=igv_message(v,self.nearby[v.id])+'\n' if v.id in self.nearby else ''
+            return overlap+nearby+original+f'{v.platform} · source row {v.source_row}\nAssembly: {v.assembly}\n{v.source_file}'
     def flags(self,index):
         flags=super().flags(index)
         if index.column()==0:flags|=Qt.ItemFlag.ItemIsUserCheckable
@@ -111,4 +118,4 @@ class VariantTableModel(QAbstractTableModel):
             v.selected=value==Qt.CheckState.Checked.value or value==Qt.CheckState.Checked
         elif index.column()==12 and role==Qt.ItemDataRole.EditRole:v.comment=str(value)
         else:return False
-        self.dataChanged.emit(index,index);self.changed.emit();return True
+        self.refresh_proximity();self.dataChanged.emit(index,index);self.changed.emit();return True

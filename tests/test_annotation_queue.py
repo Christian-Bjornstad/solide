@@ -162,6 +162,28 @@ def test_resolution_connection_failure_is_contained_to_selected_candidate(monkey
     assert browser[0][1][0].symbol=='EGFR' and 'closed' in events
 
 
+def test_retry_failed_recovers_the_whole_mtbp_batch_after_transient_annotation_outage(monkeypatch,tmp_path):
+    module,_,browser,_,_=services(monkeypatch)
+    overlap=candidate();ordinary=Variant(patient=overlap.patient,gene='EGFR',transcript='NM_005228.5',
+        coding='c.2573T>G',selected=True,assembly='GRCh37')
+    session=Session(variants=[overlap,ordinary]);offline=True
+    def resolve(row,resolver,checkpoint):
+        if offline:
+            row.raw['_annotation_resolution']={'status':'unresolved','retryable':True,'reason':'Mutalyzer: nettverksfeil.'}
+            return False
+        row.raw['_annotation_resolution']={'status':'verified','fingerprint':row.fingerprint('')}
+        return True
+    monkeypatch.setattr(module,'resolve_annotation',resolve)
+    module.run_queue(session,['MTBP'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None)
+    assert not browser
+    assert 'NM_000546.6' in ordinary.evidence['MTBP']['summary']
+    retry=module.build_search_plan(session,['MTBP'],'failed')
+    assert retry=={(overlap.id,'MTBP'),(ordinary.id,'MTBP')}
+    offline=False
+    module.run_queue(session,['MTBP'],tmp_path,module.QueueControl(),lambda *args:None,lambda message:None,plan=retry)
+    assert len(browser)==1 and len(browser[0][1])==2
+
+
 def test_mtbp_does_not_submit_a_partial_batch_when_one_query_is_invalid(monkeypatch,tmp_path):
     module,_,browser,_,_=services(monkeypatch)
     first=candidate();invalid=Variant(patient=first.patient,gene='TP53',selected=True,assembly='GRCh37')

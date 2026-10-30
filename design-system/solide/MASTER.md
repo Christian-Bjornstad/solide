@@ -34,7 +34,9 @@ Variant details start collapsed. Settings has Appearance & browser and Database
 accounts, capped at 920px with scroll and consistent gaps. Omit explanatory storage
 cards, workflow banners and sidebar headings/footers. Preserve the imported-file
 switcher. Use explicit green checkboxes, dropdown chevrons and subtle scrollbars.
-The app icon is a white S on a green rounded square; edit assets/solide.svg and
+The app icon is a silver magnifying glass over a compact sage cell cluster with
+one amber cell, on an opaque dark moss green background. The approved artwork
+is assets/solide-source.png; replace it and
 run scripts/build_icon.py to regenerate PNG/ICO files.
 
 Check all pages at 1440×940 and 1050×700 using synthetic data. Wide scientific

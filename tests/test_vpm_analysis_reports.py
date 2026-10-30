@@ -70,7 +70,7 @@ def test_default_is_one_workbook_with_vpm_layout_and_source_order(tmp_path):
         overview=book['Oversikt']
         assert {'A1:M2','A6:M6','D3:M4'}<={str(item) for item in overview.merged_cells.ranges}
         assert overview['A1'].font.sz==22 and overview['A1'].fill.fgColor.rgb[-6:]=='163B5C'
-        assert [overview.cell(7,col).value for col in range(1,14)]==['Gen','HGVSc','HGVSp','Kildefunn','Kommentar',*SOURCE_ORDER]
+        assert [overview.cell(7,col).value for col in range(1,14)]==['Gen','HGVSc','HGVSp','Kildefunn','Rapporttekst',*SOURCE_ORDER]
         assert [overview.cell(row,1).value for row in (8,9)]==['MET','EGFR']
         assert [overview.column_dimensions[col].width for col in 'ABCDE']==[14,31,25,52,32]
         assert all(overview.column_dimensions[col].width==22 for col in 'FGHIJKLM')

@@ -54,6 +54,16 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    Mutalyzer screenshot source is unchecked. Unconfirmed choices remain marked
    for review and cannot be queried or exported as findings. Low-coverage cells retain their red warning.
    Original rows occur once in Excel raw data, with each annotation linked by provenance.
+   The checkbox beside **Valgt** selects all visible rows in the active analysis;
+   clicking again clears them. A partial check means some visible rows are selected.
+   **Ny variant… → Tom variant…** opens a manual entry form. **Fra markert rad…**
+   starts an interpretation of highlighted source rows, including a combined
+   variant after IGV review. Enter a versioned transcript and nucleotide change;
+   protein, gene and locus are optional. Original rows and their choices remain
+   intact; uncheck the old calls when reporting the new interpretation instead.
+   Manual entries obtain their gene and GRCh37 alleles from exact public-reference
+   checks before any database search, also when Mutalyzer screenshots are unchecked.
+   Their original input and source-row links remain in the hidden report provenance.
    **Variant details** opens optional
    identity review and assessments. The normal view omits
    unselected absent Genexus calls and CNV/RNA quality rows; **Show all rows**
@@ -62,6 +72,18 @@ and direct Python commands. Work-PC Ivanti/access must be checked there.
    retries and **Export Excel**. MTBP tissue defaults to Other. Match states and
    source assertions stay distinct from laboratory classifications.
 4. **Settings** contains appearance, browser behaviour and database accounts.
+   The IGV warning distance for nearby selected variants defaults to 10 bp and
+   can be adjusted here; **Save settings** retains it for the next launch.
+
+For OPA sequence variants with a `c.` change and no transcript, the app uses the
+45 exact, versioned NM references from the laboratory's **Variantformatering
+OPA.xlsx → NM-nummer** list. The source cells remain intact and the supplied
+reference is recorded in provenance. Explicit references are preserved. OPA MET
+and FGFR1 use this laboratory list without the Ion Torrent MANE substitution.
+NM identifies the transcript for a `c.` description; NC identifies the chromosome
+and its assembly version for genomic checks. Intronic descriptions can retain
+both as `NC_(NM_):c.`. Missing REF/ALT still requires review before a normalized
+name can be applied automatically.
 
 Annotation checks handle unequal or reordered lists, duplicate transcripts and
 missing names without constructing all gene/name combinations. HGVS brackets and
@@ -73,7 +95,7 @@ alleles or unavailable reference services require review/retry. Automatic splitt
 is bounded to 64 transcript choices and 64 names per source row. The current
 database workflows use confirmed GRCh37/hg19 coordinates.
 
-The app icon source is `src/solide/assets/solide.svg`. Edit it and run
+The app icon source is `src/solide/assets/solide-source.png`. Replace it and run
 `python scripts/build_icon.py` to regenerate the PNG and Windows ICO.
 
 To repeat the synthetic stress run, use
@@ -100,6 +122,12 @@ in hidden **Kilder** and **Rådata** (right-click a tab and choose Unhide).
 App-generated workbook text is Norwegian; original classifications, database
 prose, screenshots and imported cells retain their source language.
 [Report layout and preservation contract](docs/EXCEL_REPORTS.md).
+[Norwegian report-cell messages](docs/RAPPORTSVAR.md) distinguish failed access,
+unconfirmed identity, missing captures and completed no-hit searches.
+[LVMS/report notation](docs/LVMS_REPORTING.md) describes checked corrections and
+protein formatting. Existing exports must be regenerated to use the current code.
+[Coverage investigation](docs/COVERAGE_LINKING.md) records why the supplied run
+matrices cannot be linked automatically to individual sample TSVs.
 
 **Identity review → Mutalyzer** shows Unchanged, Normalized, Conflict or Review
 required. A new name is applied automatically only after an independent check
@@ -111,14 +139,19 @@ those sources for the selected variant. Explicit single-result reruns keep their
 chosen scope; MTBP always retains its selected analysis batch.
 Original imported names remain intact. A green normalizer result alone is not
 proof that an arbitrary transcript is the right reporting reference.
+Protein predictions are displayed and reported without the outer `p.(...)`
+parentheses, following the laboratory's reporting convention. Original imported
+values and Mutalyzer responses retain their original notation.
 
 SpliceAI runs automatically for selected intronic candidates within ±100 bp.
 The search page shows the candidate count. Excel says **Ikke kjørt** when a
 selected variant is outside that rule.
 Its prediction window is ±500 bp with masked scores on hg19; this window differs
-from the rule selecting candidates. The app captures the actual query/settings
-and all basic transcript scores. A failed screenshot retains the API result and
-appears as **Missing capture**, available through **Retry failed**.
+from the rule selecting candidates. The app captures the actual query/settings,
+then MANE Select SpliceAI scores, Pangolin scores and Predicted Splicing
+Consequences together. The full API transcript data is retained. A failed or
+incomplete screenshot retains the API result and appears as **Missing capture**,
+available through **Retry failed**, including older SpliceAI-only captures.
 
 Source data, app assessments, reviewed HGVS and search history live only in the current session.
 Assessment is performed in the app. Excel is a versioned snapshot; edits to an

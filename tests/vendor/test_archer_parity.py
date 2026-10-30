@@ -184,7 +184,7 @@ def test_multiple_exact_matching_rows_are_terminal_manual_review():
 def test_mtbp_audit_records_matching_algorithm_revision():
     requested = mtbp_variant()
     evidence = mtbp_lookup([mtbp_row("p.Arg100Ser")], [requested])[BrowserReviewService.variant_key(requested)]
-    assert evidence.raw["identity_matching_version"] == 2
+    assert evidence.raw["identity_matching_version"] == 3
 
 
 from pathlib import Path
@@ -624,7 +624,7 @@ def test_clinvar_empty_loading_table_is_not_proof_of_absence(tmp_path):
         service._wait_for_clinvar_result(page)
 
 
-@pytest.mark.parametrize("revision,expected", [(None, "verification_required"), (1, "verification_required"), (2, "not_found")])
+@pytest.mark.parametrize("revision,expected", [(None, "verification_required"), (1, "verification_required"), (2, "verification_required"), (3, "not_found")])
 def test_previous_mtbp_gene_nohit_is_rechecked_with_current_matching(tmp_path, revision, expected):
     from solide._vendor.archer.core.models import DatabaseEvidence
     from solide._vendor.archer.services.evidence_audit import migrate_loaded_evidence
@@ -638,9 +638,10 @@ def test_previous_mtbp_gene_nohit_is_rechecked_with_current_matching(tmp_path, r
 
 @pytest.mark.parametrize("status,raw,recheck", [
     ("not_found", {"gene_candidate_count": 1}, True),
-    ("not_found", {"gene_candidate_count": 1, "identity_matching_version": 2}, False),
+    ("not_found", {"gene_candidate_count": 1, "identity_matching_version": 2}, True),
+    ("not_found", {"gene_candidate_count": 1, "identity_matching_version": 3}, False),
     ("found", {"match_basis": "unique_gene_without_reported_identity"}, True),
-    ("found", {"match_basis": "unique_gene_without_reported_identity", "identity_matching_version": 2,
+    ("found", {"match_basis": "unique_gene_without_reported_identity", "identity_matching_version": 3,
                "submitted_gene_variant_count": 1}, False),
     ("found", {"match_basis": "protein"}, False),
 ])
@@ -696,12 +697,12 @@ def test_cosmic_cache_requires_the_same_requested_variant(tmp_path, monkeypatch)
     assert calls == ["A", "T"]
 
 
-def test_cosmic_without_identifier_does_not_open_a_browser(tmp_path, monkeypatch):
+def test_cosmic_without_identifier_or_gene_cdna_does_not_open_a_browser(tmp_path, monkeypatch):
     service = BrowserReviewService(profile_root=tmp_path)
     monkeypatch.setattr(service, "_browser_api", lambda: pytest.fail("No identifier is available for this provider"))
-    requested = mtbp_variant()
+    requested = replace(mtbp_variant(), hgvsc='')
     results = service._search_cosmic([requested], tmp_path, progress=None)
-    assert results[service.variant_key(requested)].status == "not_applicable"
+    assert results[service.variant_key(requested)].status == "invalid_query"
 
 
 def test_interleaved_retained_reports_restore_the_correct_page_before_capture(tmp_path, monkeypatch):
